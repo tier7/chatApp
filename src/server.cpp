@@ -20,6 +20,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -54,10 +55,20 @@ constexpr SocketHandle kInvalidSocket =
 struct ClientInfo {
   SocketHandle socket_fd;
   std::string name;
+  std::string room;
+};
+
+struct RoomInfo {
+  std::string name;
+  std::string password;
+  std::unordered_set<SocketHandle> members;
 };
 
 std::unordered_map<SocketHandle, ClientInfo> clients;
 std::mutex clients_mutex;
+
+std::unordered_map<std::string, RoomInfo> rooms;
+std::mutex rooms_mutex;
 
 std::mutex log_mutex;
 std::ofstream log_file;
@@ -122,6 +133,38 @@ void send_system(SocketHandle socket_fd, const std::string& message) {
   send_all(socket_fd, "[system] " + message + "\n");
 }
 
+void send_room_assignment(SocketHandle socket_fd, const std::string& room_name) {
+  send_all(socket_fd, "ROOM|" + room_name + "\n");
+}
+
+std::string room_list_payload() {
+  std::lock_guard<std::mutex> lock(rooms_mutex);
+  std::ostringstream payload;
+  payload << "ROOMS|";
+  bool first = true;
+  for (const auto& [name, room] : rooms) {
+    if (!first) {
+      payload << "|";
+    }
+    payload << name << "|" << (room.password.empty() ? "open" : "locked");
+    first = false;
+  }
+  payload << "\n";
+  return payload.str();
+}
+
+void send_room_list(SocketHandle socket_fd) {
+  send_all(socket_fd, room_list_payload());
+}
+
+void broadcast_room_list() {
+  std::string payload = room_list_payload();
+  std::lock_guard<std::mutex> lock(clients_mutex);
+  for (const auto& [fd, client] : clients) {
+    send_all(fd, payload);
+  }
+}
+
 std::string trim(const std::string& value) {
   size_t start = value.find_first_not_of(" \t\r\n");
   if (start == std::string::npos) {
@@ -129,6 +172,53 @@ std::string trim(const std::string& value) {
   }
   size_t end = value.find_last_not_of(" \t\r\n");
   return value.substr(start, end - start + 1);
+}
+
+bool create_room(const std::string& room_name, const std::string& password) {
+  std::lock_guard<std::mutex> lock(rooms_mutex);
+  if (rooms.find(room_name) != rooms.end()) {
+    return false;
+  }
+  rooms.emplace(room_name, RoomInfo{room_name, password, {}});
+  return true;
+}
+
+bool join_room(SocketHandle client_fd, const std::string& room_name, const std::string& password) {
+  std::lock_guard<std::mutex> lock(rooms_mutex);
+  auto iter = rooms.find(room_name);
+  if (iter == rooms.end()) {
+    return false;
+  }
+  if (!iter->second.password.empty() && iter->second.password != password) {
+    return false;
+  }
+  iter->second.members.insert(client_fd);
+  return true;
+}
+
+void leave_room(SocketHandle client_fd, const std::string& room_name) {
+  std::lock_guard<std::mutex> lock(rooms_mutex);
+  auto iter = rooms.find(room_name);
+  if (iter == rooms.end()) {
+    return;
+  }
+  iter->second.members.erase(client_fd);
+}
+
+void broadcast_room_message(const std::string& room_name,
+                            const std::string& message,
+                            SocketHandle exclude_fd = kInvalidSocket) {
+  std::lock_guard<std::mutex> lock(rooms_mutex);
+  auto iter = rooms.find(room_name);
+  if (iter == rooms.end()) {
+    return;
+  }
+  for (SocketHandle member_fd : iter->second.members) {
+    if (member_fd == exclude_fd) {
+      continue;
+    }
+    send_all(member_fd, message);
+  }
 }
 
 void handle_private_message(SocketHandle sender_fd,
@@ -174,14 +264,22 @@ void handle_client(SocketHandle client_fd, int client_id) {
   std::string client_name = "anon" + std::to_string(client_id);
   {
     std::lock_guard<std::mutex> lock(clients_mutex);
-    clients[client_fd] = {client_fd, client_name};
+    clients[client_fd] = {client_fd, client_name, "Lobby"};
   }
+  join_room(client_fd, "Lobby", "");
+  send_room_assignment(client_fd, "Lobby");
+  send_room_list(client_fd);
 
   send_system(client_fd, "Welcome! Set your name with /name <nickname>.");
   send_system(client_fd, "Use /msg <user> <message> for private chats.");
+  send_system(client_fd, "Rooms: /create <room> [password], /join <room> [password], /leave.");
 
-  broadcast_message("[system] " + client_name + " joined the chat.\n", client_fd);
-  log_message(client_name + " joined the chat.");
+  broadcast_room_list();
+
+  broadcast_room_message("Lobby",
+                         "[system] " + client_name + " joined the room Lobby.\n",
+                         client_fd);
+  log_message(client_name + " joined the room Lobby.");
 
   char buffer[1024];
   while (running.load()) {
@@ -228,14 +326,114 @@ void handle_client(SocketHandle client_fd, int client_id) {
       continue;
     }
 
-    std::string formatted = client_name + ": " + line + "\n";
-    broadcast_message(formatted);
-    log_message(client_name + ": " + line);
+    if (line == "/rooms") {
+      send_room_list(client_fd);
+      continue;
+    }
+
+    if (line.rfind("/create ", 0) == 0) {
+      std::istringstream stream(line.substr(8));
+      std::string room_name;
+      std::string password;
+      stream >> room_name;
+      stream >> password;
+      if (room_name.empty()) {
+        send_system(client_fd, "Usage: /create <room> [password]");
+        continue;
+      }
+      if (!create_room(room_name, password)) {
+        send_system(client_fd, "Room already exists.");
+        continue;
+      }
+      broadcast_room_list();
+      send_system(client_fd, "Room created: " + room_name);
+      continue;
+    }
+
+    if (line.rfind("/join ", 0) == 0) {
+      std::istringstream stream(line.substr(6));
+      std::string room_name;
+      std::string password;
+      stream >> room_name;
+      stream >> password;
+      if (room_name.empty()) {
+        send_system(client_fd, "Usage: /join <room> [password]");
+        continue;
+      }
+      std::string current_room;
+      {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        current_room = clients[client_fd].room;
+      }
+      if (!join_room(client_fd, room_name, password)) {
+        send_system(client_fd, "Unable to join room. Check name or password.");
+        continue;
+      }
+      if (!current_room.empty() && current_room != room_name) {
+        leave_room(client_fd, current_room);
+        broadcast_room_message(
+            current_room, "[system] " + client_name + " left the room.\n", client_fd);
+      }
+      {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        clients[client_fd].room = room_name;
+      }
+      send_room_assignment(client_fd, room_name);
+      broadcast_room_message(
+          room_name, "[system] " + client_name + " joined the room.\n", client_fd);
+      log_message(client_name + " joined room " + room_name);
+      continue;
+    }
+
+    if (line == "/leave") {
+      std::string current_room;
+      {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        current_room = clients[client_fd].room;
+      }
+      if (current_room.empty() || current_room == "Lobby") {
+        send_system(client_fd, "You are already in the Lobby.");
+        continue;
+      }
+      leave_room(client_fd, current_room);
+      broadcast_room_message(
+          current_room, "[system] " + client_name + " left the room.\n", client_fd);
+      join_room(client_fd, "Lobby", "");
+      {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        clients[client_fd].room = "Lobby";
+      }
+      send_room_assignment(client_fd, "Lobby");
+      send_system(client_fd, "Moved to Lobby.");
+      continue;
+    }
+
+    std::string current_room;
+    {
+      std::lock_guard<std::mutex> lock(clients_mutex);
+      current_room = clients[client_fd].room;
+    }
+
+    if (current_room.empty()) {
+      send_system(client_fd, "Join a room before chatting.");
+      continue;
+    }
+
+    std::string formatted = "[" + current_room + "] " + client_name + ": " + line + "\n";
+    broadcast_room_message(current_room, formatted);
+    log_message("[" + current_room + "] " + client_name + ": " + line);
   }
 
+  std::string current_room;
   {
     std::lock_guard<std::mutex> lock(clients_mutex);
+    current_room = clients[client_fd].room;
     clients.erase(client_fd);
+  }
+  if (!current_room.empty()) {
+    leave_room(client_fd, current_room);
+    broadcast_room_message(
+        current_room, "[system] " + client_name + " left the room.\n", client_fd);
   }
   close_socket(client_fd);
   broadcast_message("[system] " + client_name + " left the chat.\n");
@@ -272,6 +470,11 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 #endif
+
+  {
+    std::lock_guard<std::mutex> lock(rooms_mutex);
+    rooms.emplace("Lobby", RoomInfo{"Lobby", "", {}});
+  }
 
   SocketHandle server_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (server_fd == kInvalidSocket) {
