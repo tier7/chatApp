@@ -9,6 +9,15 @@ Prosty czat oparty o TCP z obsługą rozmów zespołowych i prywatnych. Serwer k
 cmake -S . -B build
 cmake --build build
 ```
+### Windows (MinGW)
+W przypadku plików wykonywalnych zbudowanych przy użyciu MinGW mogą być wymagane biblioteki
+`libgcc_s_seh-1.dll` oraz `libstdc++-6.dll`. Możesz:
+- włączyć statyczne linkowanie runtime w CMake:
+```
+cmake -S . -B build -DCHATAPP_STATIC_MINGW_RUNTIME=ON
+cmake --build build
+```
+- albo dołączyć te DLL-e obok pliku `.exe`.
 
 ## Uruchamianie
 ### Serwer
