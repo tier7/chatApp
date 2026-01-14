@@ -13,3 +13,33 @@ if (WIN32)
   target_compile_definitions(chat_server PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
   target_compile_definitions(chat_client PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
+
+if (WIN32 AND MINGW)
+  option(CHATAPP_STATIC_MINGW_RUNTIME "Link MinGW libgcc/libstdc++ statically." OFF)
+  option(CHATAPP_COPY_MINGW_DLLS "Copy MinGW runtime DLLs next to the executables." OFF)
+
+  if (CHATAPP_STATIC_MINGW_RUNTIME)
+    target_link_options(chat_server PRIVATE -static-libgcc -static-libstdc++)
+    target_link_options(chat_client PRIVATE -static-libgcc -static-libstdc++)
+  endif()
+
+  if (CHATAPP_COPY_MINGW_DLLS)
+    find_file(MINGW_LIBGCC_DLL libgcc_s_seh-1.dll PATHS ${CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES})
+    find_file(MINGW_LIBSTDCPP_DLL libstdc++-6.dll PATHS ${CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES})
+
+    foreach(target chat_server chat_client)
+      if (MINGW_LIBGCC_DLL)
+        add_custom_command(TARGET ${target} POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${MINGW_LIBGCC_DLL}"
+          "$<TARGET_FILE_DIR:${target}>")
+      endif()
+      if (MINGW_LIBSTDCPP_DLL)
+        add_custom_command(TARGET ${target} POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${MINGW_LIBSTDCPP_DLL}"
+          "$<TARGET_FILE_DIR:${target}>")
+      endif()
+    endforeach()
+  endif()
+endif()
