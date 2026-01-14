@@ -73,19 +73,22 @@ struct UiState {
   std::string active_private;
 };
 
-std::string socket_error_text() {
-#ifdef _WIN32
-  return std::to_string(WSAGetLastError());
-#else
-  return std::strerror(errno);
-#endif
-}
+    auto* input_layout = new QHBoxLayout();
+    input_ = new QLineEdit(this);
+    send_button_ = new QPushButton(QStringLiteral("Send"), this);
 
     input_layout->addWidget(input_);
     input_layout->addWidget(send_button_);
 
     layout->addWidget(chat_view_);
     layout->addLayout(input_layout);
+
+    connect(send_button_, &QPushButton::clicked, this, &PrivateChatDialog::sendClicked);
+    connect(input_, &QLineEdit::returnPressed, this, &PrivateChatDialog::sendClicked);
+  }
+
+  QString peer() const { return peer_; }
+
 
     connect(send_button_, &QPushButton::clicked, this, &PrivateChatDialog::sendClicked);
     connect(input_, &QLineEdit::returnPressed, this, &PrivateChatDialog::sendClicked);
@@ -249,6 +252,8 @@ class ChatWindow : public QMainWindow {
       cursor.select(QTextCursor::BlockUnderCursor);
       cursor.removeSelectedText();
       cursor.deleteChar();
+    }
+  }
 bool send_all(SocketHandle socket_fd, const std::string& message) {
   const char* data = message.c_str();
   size_t total_sent = 0;
@@ -547,6 +552,70 @@ void receive_loop(SocketHandle socket_fd, UiState& state) {
     sendLine(command);
   }
 
+  }
+
+  void onReadyRead() {
+    buffer_.append(socket_->readAll());
+    while (true) {
+      int newline_index = buffer_.indexOf('\n');
+      if (newline_index < 0) {
+        break;
+      }
+      const QByteArray line_data = buffer_.left(newline_index);
+      buffer_.remove(0, newline_index + 1);
+      const QString line = QString::fromUtf8(line_data).trimmed();
+      if (line.isEmpty()) {
+        continue;
+      }
+      if (line.startsWith(QStringLiteral("ROOMS|"))) {
+        updateRooms(line.mid(6));
+        continue;
+      }
+      if (line.startsWith(QStringLiteral("ROOM|"))) {
+        const QString room = line.mid(5).trimmed();
+        current_room_label_->setText(QStringLiteral("Current room: %1").arg(room));
+        continue;
+      }
+      if (line.startsWith(QStringLiteral("[private]"))) {
+        handlePrivateMessage(line);
+        continue;
+      }
+      appendRoomLine(line);
+    }
+  }
+
+  void sendRoomMessage() {
+    const QString message = message_input_->text().trimmed();
+    if (message.isEmpty()) {
+      return;
+    }
+    sendLine(message);
+    message_input_->clear();
+  }
+
+  void setNickname() {
+    const QString name = name_input_->text().trimmed();
+    if (name.isEmpty()) {
+      return;
+    }
+    sendLine(QStringLiteral("/name %1").arg(name));
+  }
+
+  void createRoom() {
+    const QString name = room_name_input_->text().trimmed();
+    const QString pass = room_pass_input_->text().trimmed();
+    if (name.isEmpty()) {
+      QMessageBox::information(this, QStringLiteral("Rooms"),
+                               QStringLiteral("Room name is required."));
+      return;
+    }
+    QString command = QStringLiteral("/create %1").arg(name);
+    if (!pass.isEmpty()) {
+      command += QStringLiteral(" %1").arg(pass);
+    }
+    sendLine(command);
+  }
+
   void joinSelectedRoom() {
     QListWidgetItem* item = room_list_->currentItem();
     if (!item) {
@@ -556,6 +625,22 @@ void receive_loop(SocketHandle socket_fd, UiState& state) {
     }
     joinRoomFromItem(item);
   }
+
+  void joinRoomFromItem(QListWidgetItem* item) {
+    const QString name = item->data(Qt::UserRole).toString();
+    const bool locked = item->data(Qt::UserRole + 1).toBool();
+    QString pass = room_pass_input_->text().trimmed();
+    if (locked && pass.isEmpty()) {
+      pass = QInputDialog::getText(this,
+                                   QStringLiteral("Room password"),
+                                   QStringLiteral("Enter password for %1").arg(name),
+                                   QLineEdit::Password);
+    }
+    QString command = QStringLiteral("/join %1").arg(name);
+    if (!pass.isEmpty()) {
+      command += QStringLiteral(" %1").arg(pass);
+    }
+    sendLine(command);
 
   void joinRoomFromItem(QListWidgetItem* item) {
     const QString name = item->data(Qt::UserRole).toString();
