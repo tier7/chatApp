@@ -1,7 +1,12 @@
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
 #include <atomic>
 #include <cerrno>
@@ -18,18 +23,62 @@
 #include <vector>
 
 namespace {
+using SocketHandle =
+#ifdef _WIN32
+    SOCKET;
+#else
+    int;
+#endif
+
+using SockLenType =
+#ifdef _WIN32
+    int;
+#else
+    socklen_t;
+#endif
+
+using SocketSize =
+#ifdef _WIN32
+    int;
+#else
+    ssize_t;
+#endif
+
+constexpr SocketHandle kInvalidSocket =
+#ifdef _WIN32
+    INVALID_SOCKET;
+#else
+    -1;
+#endif
+
 struct ClientInfo {
-  int socket_fd;
+  SocketHandle socket_fd;
   std::string name;
 };
 
-std::unordered_map<int, ClientInfo> clients;
+std::unordered_map<SocketHandle, ClientInfo> clients;
 std::mutex clients_mutex;
 
 std::mutex log_mutex;
 std::ofstream log_file;
 
 std::atomic<bool> running{true};
+
+std::string socket_error_text() {
+#ifdef _WIN32
+  return std::to_string(WSAGetLastError());
+#else
+  return std::strerror(errno);
+#endif
+}
+
+void close_socket(SocketHandle socket_fd) {
+#ifdef _WIN32
+  closesocket(socket_fd);
+#else
+  close(socket_fd);
+#endif
+}
 
 std::string timestamp_now() {
   std::time_t now = std::time(nullptr);
@@ -44,12 +93,13 @@ void log_message(const std::string& message) {
   log_file.flush();
 }
 
-bool send_all(int socket_fd, const std::string& message) {
+bool send_all(SocketHandle socket_fd, const std::string& message) {
   const char* data = message.c_str();
   size_t total_sent = 0;
   size_t length = message.size();
   while (total_sent < length) {
-    ssize_t sent = send(socket_fd, data + total_sent, length - total_sent, 0);
+    SocketSize sent =
+        send(socket_fd, data + total_sent, static_cast<SocketSize>(length - total_sent), 0);
     if (sent <= 0) {
       return false;
     }
@@ -58,7 +108,7 @@ bool send_all(int socket_fd, const std::string& message) {
   return true;
 }
 
-void broadcast_message(const std::string& message, int exclude_fd = -1) {
+void broadcast_message(const std::string& message, SocketHandle exclude_fd = kInvalidSocket) {
   std::lock_guard<std::mutex> lock(clients_mutex);
   for (const auto& [fd, client] : clients) {
     if (fd == exclude_fd) {
@@ -68,7 +118,7 @@ void broadcast_message(const std::string& message, int exclude_fd = -1) {
   }
 }
 
-void send_system(int socket_fd, const std::string& message) {
+void send_system(SocketHandle socket_fd, const std::string& message) {
   send_all(socket_fd, "[system] " + message + "\n");
 }
 
@@ -81,7 +131,9 @@ std::string trim(const std::string& value) {
   return value.substr(start, end - start + 1);
 }
 
-void handle_private_message(int sender_fd, const std::string& sender_name, const std::string& command) {
+void handle_private_message(SocketHandle sender_fd,
+                            const std::string& sender_name,
+                            const std::string& command) {
   std::istringstream stream(command);
   std::string token;
   stream >> token;
@@ -96,7 +148,7 @@ void handle_private_message(int sender_fd, const std::string& sender_name, const
     return;
   }
 
-  int target_fd = -1;
+  SocketHandle target_fd = kInvalidSocket;
   {
     std::lock_guard<std::mutex> lock(clients_mutex);
     for (const auto& [fd, client] : clients) {
@@ -107,7 +159,7 @@ void handle_private_message(int sender_fd, const std::string& sender_name, const
     }
   }
 
-  if (target_fd == -1) {
+  if (target_fd == kInvalidSocket) {
     send_system(sender_fd, "User not found: " + target_name);
     return;
   }
@@ -118,7 +170,7 @@ void handle_private_message(int sender_fd, const std::string& sender_name, const
   log_message("[private] " + sender_name + " -> " + target_name + ": " + message);
 }
 
-void handle_client(int client_fd, int client_id) {
+void handle_client(SocketHandle client_fd, int client_id) {
   std::string client_name = "anon" + std::to_string(client_id);
   {
     std::lock_guard<std::mutex> lock(clients_mutex);
@@ -134,7 +186,7 @@ void handle_client(int client_fd, int client_id) {
   char buffer[1024];
   while (running.load()) {
     std::memset(buffer, 0, sizeof(buffer));
-    ssize_t received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+    SocketSize received = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
     if (received <= 0) {
       break;
     }
@@ -185,7 +237,7 @@ void handle_client(int client_fd, int client_id) {
     std::lock_guard<std::mutex> lock(clients_mutex);
     clients.erase(client_fd);
   }
-  close(client_fd);
+  close_socket(client_fd);
   broadcast_message("[system] " + client_name + " left the chat.\n");
   log_message(client_name + " left the chat.");
 }
@@ -213,14 +265,33 @@ int main(int argc, char* argv[]) {
 
   std::signal(SIGINT, handle_signal);
 
-  int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (server_fd < 0) {
-    std::cerr << "Socket error: " << std::strerror(errno) << "\n";
+#ifdef _WIN32
+  WSADATA wsa_data;
+  if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
+    std::cerr << "WSAStartup failed: " << socket_error_text() << "\n";
+    return 1;
+  }
+#endif
+
+  SocketHandle server_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (server_fd == kInvalidSocket) {
+    std::cerr << "Socket error: " << socket_error_text() << "\n";
+#ifdef _WIN32
+    WSACleanup();
+#endif
     return 1;
   }
 
   int opt = 1;
+#ifdef _WIN32
+  setsockopt(server_fd,
+             SOL_SOCKET,
+             SO_REUSEADDR,
+             reinterpret_cast<const char*>(&opt),
+             static_cast<int>(sizeof(opt)));
+#else
   setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#endif
 
   sockaddr_in address{};
   address.sin_family = AF_INET;
@@ -228,14 +299,20 @@ int main(int argc, char* argv[]) {
   address.sin_port = htons(static_cast<uint16_t>(port));
 
   if (bind(server_fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0) {
-    std::cerr << "Bind error: " << std::strerror(errno) << "\n";
-    close(server_fd);
+    std::cerr << "Bind error: " << socket_error_text() << "\n";
+    close_socket(server_fd);
+#ifdef _WIN32
+    WSACleanup();
+#endif
     return 1;
   }
 
   if (listen(server_fd, 10) < 0) {
-    std::cerr << "Listen error: " << std::strerror(errno) << "\n";
-    close(server_fd);
+    std::cerr << "Listen error: " << socket_error_text() << "\n";
+    close_socket(server_fd);
+#ifdef _WIN32
+    WSACleanup();
+#endif
     return 1;
   }
 
@@ -244,20 +321,31 @@ int main(int argc, char* argv[]) {
   int client_id = 1;
   while (running.load()) {
     sockaddr_in client_addr{};
-    socklen_t client_len = sizeof(client_addr);
-    int client_fd = accept(server_fd, reinterpret_cast<sockaddr*>(&client_addr), &client_len);
-    if (client_fd < 0) {
+    SockLenType client_len = sizeof(client_addr);
+    SocketHandle client_fd = accept(server_fd,
+                                    reinterpret_cast<sockaddr*>(&client_addr),
+                                    &client_len);
+    if (client_fd == kInvalidSocket) {
+#ifdef _WIN32
+      if (WSAGetLastError() == WSAEINTR) {
+        continue;
+      }
+#else
       if (errno == EINTR) {
         continue;
       }
-      std::cerr << "Accept error: " << std::strerror(errno) << "\n";
+#endif
+      std::cerr << "Accept error: " << socket_error_text() << "\n";
       break;
     }
 
     std::thread(handle_client, client_fd, client_id++).detach();
   }
 
-  close(server_fd);
+  close_socket(server_fd);
   log_message("Server shutting down.");
+#ifdef _WIN32
+  WSACleanup();
+#endif
   return 0;
 }
