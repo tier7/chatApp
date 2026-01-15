@@ -34,6 +34,16 @@ cmake --build build
 - pierwszy argument to adres serwera
 - drugi argument to port
 
+### Test obciążeniowy
+```
+./build/chat_stress 127.0.0.1 5555 20 5 30
+```
+- pierwszy argument to adres serwera
+- drugi argument to port
+- trzeci argument to liczba wątków (domyślnie 10)
+- czwarty argument to opóźnienie między wiadomościami w ms (domyślnie 10)
+- piąty argument to czas testu w sekundach (0 = do przerwania Ctrl+C)
+
 ## Komendy
 - `/name <nick>` — ustawienie nazwy użytkownika
 - `/msg <user> <message>` — wiadomość prywatna do wybranego użytkownika
