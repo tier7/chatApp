@@ -61,6 +61,7 @@ struct ClientInfo {
 struct RoomInfo {
   std::string name;
   std::string password;
+  SocketHandle owner_fd;
   std::unordered_set<SocketHandle> members;
 };
 
@@ -174,12 +175,12 @@ std::string trim(const std::string& value) {
   return value.substr(start, end - start + 1);
 }
 
-bool create_room(const std::string& room_name, const std::string& password) {
+bool create_room(const std::string& room_name, const std::string& password, SocketHandle owner_fd) {
   std::lock_guard<std::mutex> lock(rooms_mutex);
   if (rooms.find(room_name) != rooms.end()) {
     return false;
   }
-  rooms.emplace(room_name, RoomInfo{room_name, password, {}});
+  rooms.emplace(room_name, RoomInfo{room_name, password, owner_fd, {}});
   return true;
 }
 
@@ -203,6 +204,32 @@ void leave_room(SocketHandle client_fd, const std::string& room_name) {
     return;
   }
   iter->second.members.erase(client_fd);
+}
+
+enum class DeleteRoomResult {
+  kSuccess,
+  kNotFound,
+  kNotOwner,
+  kLobby,
+};
+
+DeleteRoomResult delete_room(const std::string& room_name,
+                             SocketHandle requester_fd,
+                             std::vector<SocketHandle>* members) {
+  std::lock_guard<std::mutex> lock(rooms_mutex);
+  auto iter = rooms.find(room_name);
+  if (iter == rooms.end()) {
+    return DeleteRoomResult::kNotFound;
+  }
+  if (room_name == "Lobby") {
+    return DeleteRoomResult::kLobby;
+  }
+  if (iter->second.owner_fd != requester_fd) {
+    return DeleteRoomResult::kNotOwner;
+  }
+  members->assign(iter->second.members.begin(), iter->second.members.end());
+  rooms.erase(iter);
+  return DeleteRoomResult::kSuccess;
 }
 
 void broadcast_room_message(const std::string& room_name,
@@ -272,7 +299,8 @@ void handle_client(SocketHandle client_fd, int client_id) {
 
   send_system(client_fd, "Welcome! Set your name with /name <nickname>.");
   send_system(client_fd, "Use /msg <user> <message> for private chats.");
-  send_system(client_fd, "Rooms: /create <room> [password], /join <room> [password], /leave.");
+  send_system(client_fd,
+              "Rooms: /create <room> [password], /join <room> [password], /leave, /delete <room>.");
 
   broadcast_room_list();
 
@@ -341,7 +369,7 @@ void handle_client(SocketHandle client_fd, int client_id) {
         send_system(client_fd, "Usage: /create <room> [password]");
         continue;
       }
-      if (!create_room(room_name, password)) {
+      if (!create_room(room_name, password, client_fd)) {
         send_system(client_fd, "Room already exists.");
         continue;
       }
@@ -404,6 +432,45 @@ void handle_client(SocketHandle client_fd, int client_id) {
       broadcast_room_message(
           room_name, "[system] " + client_name + " joined the room.\n", client_fd);
       log_message(client_name + " joined room " + room_name);
+      continue;
+    }
+
+    if (line.rfind("/delete ", 0) == 0) {
+      std::istringstream stream(line.substr(8));
+      std::string room_name;
+      stream >> room_name;
+      if (room_name.empty()) {
+        send_system(client_fd, "Usage: /delete <room>");
+        continue;
+      }
+      std::vector<SocketHandle> members;
+      DeleteRoomResult result = delete_room(room_name, client_fd, &members);
+      if (result == DeleteRoomResult::kNotFound) {
+        send_system(client_fd, "Room not found.");
+        continue;
+      }
+      if (result == DeleteRoomResult::kLobby) {
+        send_system(client_fd, "The Lobby cannot be deleted.");
+        continue;
+      }
+      if (result == DeleteRoomResult::kNotOwner) {
+        send_system(client_fd, "Only the room owner can delete it.");
+        continue;
+      }
+      for (SocketHandle member_fd : members) {
+        {
+          std::lock_guard<std::mutex> lock(clients_mutex);
+          auto iter = clients.find(member_fd);
+          if (iter != clients.end()) {
+            iter->second.room = "Lobby";
+          }
+        }
+        join_room(member_fd, "Lobby", "");
+        send_room_assignment(member_fd, "Lobby");
+        send_system(member_fd, "Room deleted. You have been moved to Lobby.");
+      }
+      broadcast_room_list();
+      log_message(client_name + " deleted room " + room_name);
       continue;
     }
 
@@ -495,7 +562,7 @@ int main(int argc, char* argv[]) {
 
   {
     std::lock_guard<std::mutex> lock(rooms_mutex);
-    rooms.emplace("Lobby", RoomInfo{"Lobby", "", {}});
+    rooms.emplace("Lobby", RoomInfo{"Lobby", "", kInvalidSocket, {}});
   }
 
   SocketHandle server_fd = socket(AF_INET, SOCK_STREAM, 0);
