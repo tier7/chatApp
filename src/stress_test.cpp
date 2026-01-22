@@ -11,8 +11,10 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <condition_variable>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -106,10 +108,46 @@ void send_line(SocketHandle socket_fd, const std::string& line) {
   send_all(socket_fd, line + "\n");
 }
 
+class SyncBarrier {
+ public:
+  explicit SyncBarrier(int participants) : participants_(participants) {}
+
+  bool arrive_and_wait() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!active_) {
+      return false;
+    }
+    int current_generation = generation_;
+    if (++arrived_ >= participants_) {
+      arrived_ = 0;
+      ++generation_;
+      condition_.notify_all();
+      return active_;
+    }
+    condition_.wait(lock, [&]() { return generation_ != current_generation || !active_; });
+    return active_;
+  }
+
+  void stop() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    active_ = false;
+    condition_.notify_all();
+  }
+
+ private:
+  int participants_;
+  int arrived_ = 0;
+  int generation_ = 0;
+  bool active_ = true;
+  std::mutex mutex_;
+  std::condition_variable condition_;
+};
+
 void worker_loop(int thread_id,
                  const std::string& host,
                  int port,
                  int delay_ms,
+                 SyncBarrier* barrier,
                  std::atomic<uint64_t>& total_sent) {
   SocketHandle socket_fd = connect_to_host(host, port);
   if (socket_fd == kInvalidSocket) {
@@ -122,6 +160,11 @@ void worker_loop(int thread_id,
 
   uint64_t counter = 0;
   while (running.load()) {
+    if (barrier != nullptr) {
+      if (!barrier->arrive_and_wait()) {
+        break;
+      }
+    }
     std::ostringstream message_stream;
     message_stream << "load-test " << thread_id << " " << counter++;
     if (!send_all(socket_fd, message_stream.str() + "\n")) {
@@ -143,6 +186,7 @@ int main(int argc, char* argv[]) {
   int threads = 10;
   int delay_ms = 10;
   int duration_sec = 0;
+  bool sync_mode = false;
 
   if (argc >= 2) {
     host = argv[1];
@@ -159,6 +203,11 @@ int main(int argc, char* argv[]) {
   if (argc >= 6) {
     duration_sec = std::stoi(argv[5]);
   }
+  for (int i = 6; i < argc; ++i) {
+    if (std::string(argv[i]) == "--sync") {
+      sync_mode = true;
+    }
+  }
 
 #ifdef _WIN32
   WSADATA wsa_data;
@@ -172,6 +221,9 @@ int main(int argc, char* argv[]) {
 
   std::cout << "Starting stress test with " << threads << " threads to " << host << ":" << port
             << " (delay " << delay_ms << " ms).";
+  if (sync_mode) {
+    std::cout << " Synchronized burst mode enabled.";
+  }
   if (duration_sec > 0) {
     std::cout << " Duration: " << duration_sec << "s.";
   }
@@ -180,10 +232,13 @@ int main(int argc, char* argv[]) {
   std::atomic<uint64_t> total_sent{0};
   std::vector<std::thread> workers;
   workers.reserve(static_cast<size_t>(threads));
+  SyncBarrier barrier(threads);
+  SyncBarrier* barrier_ptr = sync_mode ? &barrier : nullptr;
 
   auto start_time = std::chrono::steady_clock::now();
   for (int i = 0; i < threads; ++i) {
-    workers.emplace_back(worker_loop, i + 1, host, port, delay_ms, std::ref(total_sent));
+    workers.emplace_back(worker_loop, i + 1, host, port, delay_ms, barrier_ptr,
+                         std::ref(total_sent));
   }
 
   while (running.load()) {
@@ -195,6 +250,9 @@ int main(int argc, char* argv[]) {
         running.store(false);
       }
     }
+  }
+  if (barrier_ptr != nullptr) {
+    barrier_ptr->stop();
   }
 
   for (auto& worker : workers) {
