@@ -5,7 +5,7 @@
 
 #include <QtCore/QBuffer>
 #include <QtCore/QDateTime>
-#include <QtCore/QTimer>
+#include <QtCore/QVector>
 #include <QtNetwork/QHostAddress>
 #include <QtNetwork/QTcpSocket>
 #include <QtGui/QAction>
@@ -155,29 +155,31 @@ class ChatWindow : public QMainWindow {
     connect(notifications_list_, &QListWidget::itemDoubleClicked, this,
             &ChatWindow::openNotificationChat);
 
-    auto* load_group = new QGroupBox(QStringLiteral("Load test"), panel);
-    auto* load_layout = new QFormLayout(load_group);
-    load_interval_input_ = new QSpinBox(load_group);
-    load_interval_input_->setRange(10, 60000);
-    load_interval_input_->setValue(200);
-    load_interval_input_->setSuffix(QStringLiteral(" ms"));
-    load_start_button_ = new QPushButton(QStringLiteral("Start"), load_group);
-    load_stop_button_ = new QPushButton(QStringLiteral("Stop"), load_group);
-    load_stop_button_->setEnabled(false);
+    auto* test_group = new QGroupBox(QStringLiteral("Test room"), panel);
+    auto* test_layout = new QFormLayout(test_group);
+    test_room_input_ = new QLineEdit(test_group);
+    test_room_input_->setPlaceholderText(QStringLiteral("test-room"));
+    bot_count_input_ = new QSpinBox(test_group);
+    bot_count_input_->setRange(1, 50);
+    bot_count_input_->setValue(5);
+    test_start_button_ = new QPushButton(QStringLiteral("Start"), test_group);
+    test_stop_button_ = new QPushButton(QStringLiteral("Stop"), test_group);
+    test_stop_button_->setEnabled(false);
 
-    auto* load_buttons = new QHBoxLayout();
-    load_buttons->addWidget(load_start_button_);
-    load_buttons->addWidget(load_stop_button_);
+    auto* test_buttons = new QHBoxLayout();
+    test_buttons->addWidget(test_start_button_);
+    test_buttons->addWidget(test_stop_button_);
 
-    load_layout->addRow(QStringLiteral("Interval"), load_interval_input_);
-    load_layout->addRow(load_buttons);
+    test_layout->addRow(QStringLiteral("Room"), test_room_input_);
+    test_layout->addRow(QStringLiteral("Bots"), bot_count_input_);
+    test_layout->addRow(test_buttons);
 
-    connect(load_start_button_, &QPushButton::clicked, this, &ChatWindow::startLoadTest);
-    connect(load_stop_button_, &QPushButton::clicked, this, &ChatWindow::stopLoadTest);
+    connect(test_start_button_, &QPushButton::clicked, this, &ChatWindow::startTestRoom);
+    connect(test_stop_button_, &QPushButton::clicked, this, &ChatWindow::stopTestRoom);
 
     layout->addWidget(profile_group);
     layout->addWidget(room_group);
-    layout->addWidget(load_group);
+    layout->addWidget(test_group);
     layout->addWidget(notifications_group, 1);
     layout->addStretch();
     return panel;
@@ -321,7 +323,7 @@ class ChatWindow : public QMainWindow {
 
   void onDisconnected() {
     appendRoomLine(QStringLiteral("Disconnected from server."));
-    stopLoadTest();
+    stopTestRoom();
   }
 
   void onReadyRead() {
@@ -436,34 +438,74 @@ class ChatWindow : public QMainWindow {
     sendLine(QStringLiteral("/msg %1 %2").arg(peer, message));
   }
 
-  void startLoadTest() {
-    if (load_timer_->isActive()) {
+  void startTestRoom() {
+    if (socket_->state() != QAbstractSocket::ConnectedState) {
+      QMessageBox::warning(this, QStringLiteral("Connection"),
+                           QStringLiteral("Not connected to server."));
       return;
     }
-    load_counter_ = 1;
-    load_start_button_->setEnabled(false);
-    load_stop_button_->setEnabled(true);
-    load_timer_->start(load_interval_input_->value());
-    sendLoadMessage();
-  }
-
-  void stopLoadTest() {
-    if (!load_timer_) {
+    if (test_active_) {
       return;
     }
-    load_timer_->stop();
-    load_start_button_->setEnabled(true);
-    load_stop_button_->setEnabled(false);
+    QString room = test_room_input_->text().trimmed();
+    if (room.isEmpty()) {
+      room = QStringLiteral("test-room");
+      test_room_input_->setText(room);
+    }
+
+    test_active_ = true;
+    test_start_button_->setEnabled(false);
+    test_stop_button_->setEnabled(true);
+
+    sendLine(QStringLiteral("/create %1").arg(room));
+    sendLine(QStringLiteral("/join %1").arg(room));
+
+    const int bot_count = bot_count_input_->value();
+    for (int i = 1; i <= bot_count; ++i) {
+      createBot(room, i);
+    }
   }
 
-  void sendLoadMessage() {
-    QString nick = name_input_->text().trimmed();
-    if (nick.isEmpty()) {
-      nick = QStringLiteral("anonymous");
+  void stopTestRoom() {
+    if (!test_active_ && bot_sockets_.isEmpty()) {
+      return;
     }
-    const QString message =
-        QStringLiteral("[%1] - test wiadomość numer %2").arg(nick).arg(load_counter_++);
-    sendLine(message);
+    test_active_ = false;
+    test_start_button_->setEnabled(true);
+    test_stop_button_->setEnabled(false);
+
+    for (auto* bot : bot_sockets_) {
+      if (bot) {
+        bot->disconnectFromHost();
+        bot->deleteLater();
+      }
+    }
+    bot_sockets_.clear();
+  }
+
+  void createBot(const QString& room, int index) {
+    auto* bot = new QTcpSocket(this);
+    bot_sockets_.append(bot);
+    const QString bot_name = QStringLiteral("Bot%1").arg(index);
+
+    connect(bot, &QTcpSocket::connected, this, [this, bot, bot_name, room]() {
+      sendBotLine(bot, QStringLiteral("/name %1").arg(bot_name));
+      sendBotLine(bot, QStringLiteral("/join %1").arg(room));
+    });
+    connect(bot, &QTcpSocket::disconnected, this, [this, bot]() {
+      bot_sockets_.removeAll(bot);
+      bot->deleteLater();
+    });
+
+    bot->connectToHost(host_, static_cast<quint16>(port_));
+  }
+
+  void sendBotLine(QTcpSocket* bot, const QString& line) {
+    if (!bot || bot->state() != QAbstractSocket::ConnectedState) {
+      return;
+    }
+    const QByteArray data = (line + "\n").toUtf8();
+    bot->write(data);
   }
 
  private:
@@ -482,11 +524,12 @@ class ChatWindow : public QMainWindow {
   QLabel* current_room_label_ = nullptr;
   QLineEdit* message_input_ = nullptr;
   QPushButton* send_button_ = nullptr;
-  QTimer* load_timer_ = nullptr;
-  QSpinBox* load_interval_input_ = nullptr;
-  QPushButton* load_start_button_ = nullptr;
-  QPushButton* load_stop_button_ = nullptr;
-  int load_counter_ = 1;
+  QLineEdit* test_room_input_ = nullptr;
+  QSpinBox* bot_count_input_ = nullptr;
+  QPushButton* test_start_button_ = nullptr;
+  QPushButton* test_stop_button_ = nullptr;
+  QVector<QTcpSocket*> bot_sockets_;
+  bool test_active_ = false;
 
   QMap<QString, PrivateChatDialog*> private_chats_;
 };
