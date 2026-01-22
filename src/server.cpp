@@ -346,7 +346,29 @@ void handle_client(SocketHandle client_fd, int client_id) {
         continue;
       }
       broadcast_room_list();
-      send_system(client_fd, "Room created: " + room_name);
+      std::string current_room;
+      {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        current_room = clients[client_fd].room;
+      }
+      if (!join_room(client_fd, room_name, password)) {
+        send_system(client_fd, "Room created, but unable to join.");
+        continue;
+      }
+      if (!current_room.empty() && current_room != room_name) {
+        leave_room(client_fd, current_room);
+        broadcast_room_message(
+            current_room, "[system] " + client_name + " left the room.\n", client_fd);
+      }
+      {
+        std::lock_guard<std::mutex> lock(clients_mutex);
+        clients[client_fd].room = room_name;
+      }
+      send_room_assignment(client_fd, room_name);
+      broadcast_room_message(
+          room_name, "[system] " + client_name + " joined the room.\n", client_fd);
+      log_message(client_name + " joined room " + room_name);
+      send_system(client_fd, "Room created and joined: " + room_name);
       continue;
     }
 
