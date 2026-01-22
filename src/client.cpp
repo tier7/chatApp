@@ -23,6 +23,7 @@
 #include <QtWidgets/QMenuBar>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QSpinBox>
 #include <QtWidgets/QTextEdit>
 #include <QtWidgets/QVBoxLayout>
 
@@ -110,6 +111,9 @@ class ChatWindow : public QMainWindow {
     connect(socket_, &QTcpSocket::connected, this, &ChatWindow::onConnected);
     connect(socket_, &QTcpSocket::disconnected, this, &ChatWindow::onDisconnected);
 
+    load_timer_ = new QTimer(this);
+    connect(load_timer_, &QTimer::timeout, this, &ChatWindow::sendLoadMessage);
+
     socket_->connectToHost(host_, static_cast<quint16>(port_));
   }
 
@@ -151,8 +155,29 @@ class ChatWindow : public QMainWindow {
     connect(notifications_list_, &QListWidget::itemDoubleClicked, this,
             &ChatWindow::openNotificationChat);
 
+    auto* load_group = new QGroupBox(QStringLiteral("Load test"), panel);
+    auto* load_layout = new QFormLayout(load_group);
+    load_interval_input_ = new QSpinBox(load_group);
+    load_interval_input_->setRange(10, 60000);
+    load_interval_input_->setValue(200);
+    load_interval_input_->setSuffix(QStringLiteral(" ms"));
+    load_start_button_ = new QPushButton(QStringLiteral("Start"), load_group);
+    load_stop_button_ = new QPushButton(QStringLiteral("Stop"), load_group);
+    load_stop_button_->setEnabled(false);
+
+    auto* load_buttons = new QHBoxLayout();
+    load_buttons->addWidget(load_start_button_);
+    load_buttons->addWidget(load_stop_button_);
+
+    load_layout->addRow(QStringLiteral("Interval"), load_interval_input_);
+    load_layout->addRow(load_buttons);
+
+    connect(load_start_button_, &QPushButton::clicked, this, &ChatWindow::startLoadTest);
+    connect(load_stop_button_, &QPushButton::clicked, this, &ChatWindow::stopLoadTest);
+
     layout->addWidget(profile_group);
     layout->addWidget(room_group);
+    layout->addWidget(load_group);
     layout->addWidget(notifications_group, 1);
     layout->addStretch();
     return panel;
@@ -296,6 +321,7 @@ class ChatWindow : public QMainWindow {
 
   void onDisconnected() {
     appendRoomLine(QStringLiteral("Disconnected from server."));
+    stopLoadTest();
   }
 
   void onReadyRead() {
@@ -410,6 +436,36 @@ class ChatWindow : public QMainWindow {
     sendLine(QStringLiteral("/msg %1 %2").arg(peer, message));
   }
 
+  void startLoadTest() {
+    if (load_timer_->isActive()) {
+      return;
+    }
+    load_counter_ = 1;
+    load_start_button_->setEnabled(false);
+    load_stop_button_->setEnabled(true);
+    load_timer_->start(load_interval_input_->value());
+    sendLoadMessage();
+  }
+
+  void stopLoadTest() {
+    if (!load_timer_) {
+      return;
+    }
+    load_timer_->stop();
+    load_start_button_->setEnabled(true);
+    load_stop_button_->setEnabled(false);
+  }
+
+  void sendLoadMessage() {
+    QString nick = name_input_->text().trimmed();
+    if (nick.isEmpty()) {
+      nick = QStringLiteral("anonymous");
+    }
+    const QString message =
+        QStringLiteral("[%1] - test wiadomość numer %2").arg(nick).arg(load_counter_++);
+    sendLine(message);
+  }
+
  private:
   QString host_;
   int port_ = 0;
@@ -426,6 +482,11 @@ class ChatWindow : public QMainWindow {
   QLabel* current_room_label_ = nullptr;
   QLineEdit* message_input_ = nullptr;
   QPushButton* send_button_ = nullptr;
+  QTimer* load_timer_ = nullptr;
+  QSpinBox* load_interval_input_ = nullptr;
+  QPushButton* load_start_button_ = nullptr;
+  QPushButton* load_stop_button_ = nullptr;
+  int load_counter_ = 1;
 
   QMap<QString, PrivateChatDialog*> private_chats_;
 };

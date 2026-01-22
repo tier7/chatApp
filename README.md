@@ -33,6 +33,8 @@ cmake --build build
 ```
 - pierwszy argument to adres serwera
 - drugi argument to port
+- w GUI dostępny jest panel "Load test" z przyciskami Start/Stop, który cyklicznie wysyła
+  wiadomości testowe w formacie `[NICK] - test wiadomość numer X`
 
 ### Test obciążeniowy
 ```
