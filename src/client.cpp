@@ -111,6 +111,9 @@ class ChatWindow : public QMainWindow {
     connect(socket_, &QTcpSocket::connected, this, &ChatWindow::onConnected);
     connect(socket_, &QTcpSocket::disconnected, this, &ChatWindow::onDisconnected);
 
+    load_timer_ = new QTimer(this);
+    connect(load_timer_, &QTimer::timeout, this, &ChatWindow::sendLoadMessage);
+
     socket_->connectToHost(host_, static_cast<quint16>(port_));
   }
 
