@@ -43,6 +43,8 @@ cmake --build build
 - trzeci argument to liczba wątków (domyślnie 10)
 - czwarty argument to opóźnienie między wiadomościami w ms (domyślnie 10)
 - piąty argument to czas testu w sekundach (0 = do przerwania Ctrl+C)
+- opcjonalnie `--sync` uruchamia tryb zsynchronizowanych wysyłek, w którym wszystkie
+  wątki wysyłają wiadomości jednocześnie (zalecane >=5 wątków)
 
 ## Komendy
 - `/name <nick>` — ustawienie nazwy użytkownika
