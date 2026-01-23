@@ -6,6 +6,7 @@
 #include <QtCore/QBuffer>
 #include <QtCore/QDateTime>
 #include <QtCore/QHash>
+#include <QtCore/QRandomGenerator>
 #include <QtCore/QTimer>
 #include <QtCore/QVector>
 #include <QtNetwork/QHostAddress>
@@ -164,6 +165,14 @@ class ChatWindow : public QMainWindow {
     bot_count_input_ = new QSpinBox(test_group);
     bot_count_input_->setRange(1, 50);
     bot_count_input_->setValue(5);
+    bot_delay_min_input_ = new QSpinBox(test_group);
+    bot_delay_min_input_->setRange(100, 10000);
+    bot_delay_min_input_->setValue(1000);
+    bot_delay_min_input_->setSuffix(QStringLiteral(" ms"));
+    bot_delay_max_input_ = new QSpinBox(test_group);
+    bot_delay_max_input_->setRange(100, 10000);
+    bot_delay_max_input_->setValue(2500);
+    bot_delay_max_input_->setSuffix(QStringLiteral(" ms"));
     test_start_button_ = new QPushButton(QStringLiteral("Start"), test_group);
     test_stop_button_ = new QPushButton(QStringLiteral("Stop"), test_group);
     test_stop_button_->setEnabled(false);
@@ -174,6 +183,8 @@ class ChatWindow : public QMainWindow {
 
     test_layout->addRow(QStringLiteral("Room"), test_room_input_);
     test_layout->addRow(QStringLiteral("Bots"), bot_count_input_);
+    test_layout->addRow(QStringLiteral("Bot delay min"), bot_delay_min_input_);
+    test_layout->addRow(QStringLiteral("Bot delay max"), bot_delay_max_input_);
     test_layout->addRow(test_buttons);
 
     connect(test_start_button_, &QPushButton::clicked, this, &ChatWindow::startTestRoom);
@@ -463,8 +474,15 @@ class ChatWindow : public QMainWindow {
     sendLine(QStringLiteral("/join %1").arg(room));
 
     const int bot_count = bot_count_input_->value();
+    int min_delay = bot_delay_min_input_->value();
+    int max_delay = bot_delay_max_input_->value();
+    if (min_delay > max_delay) {
+      std::swap(min_delay, max_delay);
+      bot_delay_min_input_->setValue(min_delay);
+      bot_delay_max_input_->setValue(max_delay);
+    }
     for (int i = 1; i <= bot_count; ++i) {
-      createBot(room, i);
+      createBot(room, i, min_delay, max_delay);
     }
   }
 
@@ -494,18 +512,18 @@ class ChatWindow : public QMainWindow {
     bot_sockets_.clear();
   }
 
-  void createBot(const QString& room, int index) {
+  void createBot(const QString& room, int index, int min_delay, int max_delay) {
     auto* bot = new QTcpSocket(this);
     bot_sockets_.append(bot);
     const QString bot_name = QStringLiteral("Bot%1").arg(index);
 
-    connect(bot, &QTcpSocket::connected, this, [this, bot, bot_name, room]() {
+    connect(bot, &QTcpSocket::connected, this, [this, bot, bot_name, room, min_delay, max_delay]() {
       sendBotLine(bot, QStringLiteral("/name %1").arg(bot_name));
       sendBotLine(bot, QStringLiteral("/join %1").arg(room));
       bot_message_counts_[bot] = 0;
       auto* timer = new QTimer(bot);
-      timer->setInterval(1500);
-      connect(timer, &QTimer::timeout, this, [this, bot, bot_name]() {
+      timer->setSingleShot(true);
+      connect(timer, &QTimer::timeout, this, [this, bot, bot_name, min_delay, max_delay, timer]() {
         if (!bot || bot->state() != QAbstractSocket::ConnectedState) {
           return;
         }
@@ -513,9 +531,16 @@ class ChatWindow : public QMainWindow {
         sendBotLine(
             bot,
             QStringLiteral("[%1] message %2").arg(bot_name).arg(next_message));
+        if (min_delay > 0 && max_delay >= min_delay) {
+          const int delay = QRandomGenerator::global()->bounded(min_delay, max_delay + 1);
+          timer->start(delay);
+        }
       });
       bot_timers_.insert(bot, timer);
-      timer->start();
+      if (min_delay > 0 && max_delay >= min_delay) {
+        const int delay = QRandomGenerator::global()->bounded(min_delay, max_delay + 1);
+        timer->start(delay);
+      }
     });
     connect(bot, &QTcpSocket::disconnected, this, [this, bot]() {
       if (bot_timers_.contains(bot)) {
@@ -557,6 +582,8 @@ class ChatWindow : public QMainWindow {
   QPushButton* send_button_ = nullptr;
   QLineEdit* test_room_input_ = nullptr;
   QSpinBox* bot_count_input_ = nullptr;
+  QSpinBox* bot_delay_min_input_ = nullptr;
+  QSpinBox* bot_delay_max_input_ = nullptr;
   QPushButton* test_start_button_ = nullptr;
   QPushButton* test_stop_button_ = nullptr;
   QVector<QTcpSocket*> bot_sockets_;
