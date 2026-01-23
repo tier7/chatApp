@@ -308,9 +308,6 @@ void handle_client(SocketHandle client_fd, int client_id) {
 
   broadcast_room_list();
 
-  broadcast_room_message("Lobby",
-                         "[system] " + client_name + " joined the room Lobby.\n",
-                         client_fd);
   log_message(client_name + " joined the room Lobby.");
 
   std::string incoming;
