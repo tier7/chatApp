@@ -175,6 +175,10 @@ std::string trim(const std::string& value) {
   return value.substr(start, end - start + 1);
 }
 
+bool is_bot_name(const std::string& name) {
+  return name.rfind("Bot", 0) == 0;
+}
+
 bool create_room(const std::string& room_name, const std::string& password, SocketHandle owner_fd) {
   std::lock_guard<std::mutex> lock(rooms_mutex);
   if (rooms.find(room_name) != rooms.end()) {
@@ -347,7 +351,9 @@ void handle_client(SocketHandle client_fd, int client_id) {
           }
         }
         if (!new_name.empty()) {
-          broadcast_message("[system] " + client_name + " is now known as " + new_name + ".\n");
+          if (!is_bot_name(new_name)) {
+            broadcast_message("[system] " + client_name + " is now known as " + new_name + ".\n");
+          }
           log_message(client_name + " renamed to " + new_name);
           client_name = new_name;
         }
@@ -390,16 +396,20 @@ void handle_client(SocketHandle client_fd, int client_id) {
         }
         if (!current_room.empty() && current_room != room_name) {
           leave_room(client_fd, current_room);
-          broadcast_room_message(
-              current_room, "[system] " + client_name + " left the room.\n", client_fd);
+          if (!is_bot_name(client_name)) {
+            broadcast_room_message(
+                current_room, "[system] " + client_name + " left the room.\n", client_fd);
+          }
         }
         {
           std::lock_guard<std::mutex> lock(clients_mutex);
           clients[client_fd].room = room_name;
         }
         send_room_assignment(client_fd, room_name);
-        broadcast_room_message(
-            room_name, "[system] " + client_name + " joined the room.\n", client_fd);
+        if (!is_bot_name(client_name)) {
+          broadcast_room_message(
+              room_name, "[system] " + client_name + " joined the room.\n", client_fd);
+        }
         log_message(client_name + " joined room " + room_name);
         send_system(client_fd, "Room created and joined: " + room_name);
         continue;
@@ -426,16 +436,20 @@ void handle_client(SocketHandle client_fd, int client_id) {
         }
         if (!current_room.empty() && current_room != room_name) {
           leave_room(client_fd, current_room);
-          broadcast_room_message(
-              current_room, "[system] " + client_name + " left the room.\n", client_fd);
+          if (!is_bot_name(client_name)) {
+            broadcast_room_message(
+                current_room, "[system] " + client_name + " left the room.\n", client_fd);
+          }
         }
         {
           std::lock_guard<std::mutex> lock(clients_mutex);
           clients[client_fd].room = room_name;
         }
         send_room_assignment(client_fd, room_name);
-        broadcast_room_message(
-            room_name, "[system] " + client_name + " joined the room.\n", client_fd);
+        if (!is_bot_name(client_name)) {
+          broadcast_room_message(
+              room_name, "[system] " + client_name + " joined the room.\n", client_fd);
+        }
         log_message(client_name + " joined room " + room_name);
         continue;
       }
