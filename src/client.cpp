@@ -5,6 +5,8 @@
 
 #include <QtCore/QBuffer>
 #include <QtCore/QDateTime>
+#include <QtCore/QHash>
+#include <QtCore/QTimer>
 #include <QtCore/QVector>
 #include <QtNetwork/QHostAddress>
 #include <QtNetwork/QTcpSocket>
@@ -474,6 +476,15 @@ class ChatWindow : public QMainWindow {
     test_start_button_->setEnabled(true);
     test_stop_button_->setEnabled(false);
 
+    for (auto it = bot_timers_.begin(); it != bot_timers_.end(); ++it) {
+      if (it.value()) {
+        it.value()->stop();
+        it.value()->deleteLater();
+      }
+    }
+    bot_timers_.clear();
+    bot_message_counts_.clear();
+
     for (auto* bot : bot_sockets_) {
       if (bot) {
         bot->disconnectFromHost();
@@ -491,8 +502,28 @@ class ChatWindow : public QMainWindow {
     connect(bot, &QTcpSocket::connected, this, [this, bot, bot_name, room]() {
       sendBotLine(bot, QStringLiteral("/name %1").arg(bot_name));
       sendBotLine(bot, QStringLiteral("/join %1").arg(room));
+      bot_message_counts_[bot] = 0;
+      auto* timer = new QTimer(bot);
+      timer->setInterval(1500);
+      connect(timer, &QTimer::timeout, this, [this, bot, bot_name]() {
+        if (!bot || bot->state() != QAbstractSocket::ConnectedState) {
+          return;
+        }
+        const int next_message = ++bot_message_counts_[bot];
+        sendBotLine(
+            bot,
+            QStringLiteral("[%1] message %2").arg(bot_name).arg(next_message));
+      });
+      bot_timers_.insert(bot, timer);
+      timer->start();
     });
     connect(bot, &QTcpSocket::disconnected, this, [this, bot]() {
+      if (bot_timers_.contains(bot)) {
+        bot_timers_[bot]->stop();
+        bot_timers_[bot]->deleteLater();
+        bot_timers_.remove(bot);
+      }
+      bot_message_counts_.remove(bot);
       bot_sockets_.removeAll(bot);
       bot->deleteLater();
     });
@@ -529,6 +560,8 @@ class ChatWindow : public QMainWindow {
   QPushButton* test_start_button_ = nullptr;
   QPushButton* test_stop_button_ = nullptr;
   QVector<QTcpSocket*> bot_sockets_;
+  QHash<QTcpSocket*, QTimer*> bot_timers_;
+  QHash<QTcpSocket*, int> bot_message_counts_;
   bool test_active_ = false;
 
   QMap<QString, PrivateChatDialog*> private_chats_;
