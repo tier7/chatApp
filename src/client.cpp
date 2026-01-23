@@ -469,6 +469,7 @@ class ChatWindow : public QMainWindow {
     test_active_ = true;
     test_start_button_->setEnabled(false);
     test_stop_button_->setEnabled(true);
+    ++bot_run_id_;
 
     sendLine(QStringLiteral("/create %1").arg(room));
     sendLine(QStringLiteral("/join %1").arg(room));
@@ -515,7 +516,7 @@ class ChatWindow : public QMainWindow {
   void createBot(const QString& room, int index, int min_delay, int max_delay) {
     auto* bot = new QTcpSocket(this);
     bot_sockets_.append(bot);
-    const QString bot_name = QStringLiteral("Bot%1").arg(index);
+    const QString bot_name = QStringLiteral("Bot%1-%2").arg(index).arg(bot_run_id_);
 
     connect(bot, &QTcpSocket::connected, this, [this, bot, bot_name, room, min_delay, max_delay]() {
       sendBotLine(bot, QStringLiteral("/name %1").arg(bot_name));
@@ -590,6 +591,7 @@ class ChatWindow : public QMainWindow {
   QHash<QTcpSocket*, QTimer*> bot_timers_;
   QHash<QTcpSocket*, int> bot_message_counts_;
   bool test_active_ = false;
+  int bot_run_id_ = 0;
 
   QMap<QString, PrivateChatDialog*> private_chats_;
 };
