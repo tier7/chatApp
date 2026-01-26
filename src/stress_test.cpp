@@ -21,30 +21,30 @@
 #include <vector>
 
 namespace {
-using SocketHandle =
+using UchwytGniazda =
 #ifdef _WIN32
     SOCKET;
 #else
     int;
 #endif
 
-using SocketSize =
+using RozmiarGniazda =
 #ifdef _WIN32
     int;
 #else
     ssize_t;
 #endif
 
-constexpr SocketHandle kInvalidSocket =
+constexpr UchwytGniazda kNieprawidloweGniazdo =
 #ifdef _WIN32
     INVALID_SOCKET;
 #else
     -1;
 #endif
 
-std::atomic<bool> running{true};
+std::atomic<bool> uruchomione{true};
 
-std::string socket_error_text() {
+std::string tekst_bledu_gniazda() {
 #ifdef _WIN32
   return std::to_string(WSAGetLastError());
 #else
@@ -52,216 +52,217 @@ std::string socket_error_text() {
 #endif
 }
 
-void close_socket(SocketHandle socket_fd) {
+void zamknij_gniazdo(UchwytGniazda gniazdo) {
 #ifdef _WIN32
-  closesocket(socket_fd);
+  closesocket(gniazdo);
 #else
-  close(socket_fd);
+  close(gniazdo);
 #endif
 }
 
-bool send_all(SocketHandle socket_fd, const std::string& message) {
-  const char* data = message.c_str();
-  size_t total_sent = 0;
-  size_t length = message.size();
-  while (total_sent < length) {
-    SocketSize sent =
-        send(socket_fd, data + total_sent, static_cast<SocketSize>(length - total_sent), 0);
-    if (sent <= 0) {
+bool wyslij_wszystko(UchwytGniazda gniazdo, const std::string& wiadomosc) {
+  const char* dane = wiadomosc.c_str();
+  size_t lacznie_wyslano = 0;
+  size_t dlugosc = wiadomosc.size();
+  while (lacznie_wyslano < dlugosc) {
+    RozmiarGniazda wyslano =
+        send(gniazdo, dane + lacznie_wyslano,
+             static_cast<RozmiarGniazda>(dlugosc - lacznie_wyslano), 0);
+    if (wyslano <= 0) {
       return false;
     }
-    total_sent += static_cast<size_t>(sent);
+    lacznie_wyslano += static_cast<size_t>(wyslano);
   }
   return true;
 }
 
-SocketHandle connect_to_host(const std::string& host, int port) {
-  SocketHandle socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (socket_fd == kInvalidSocket) {
-    std::cerr << "Socket error: " << socket_error_text() << "\n";
-    return kInvalidSocket;
+UchwytGniazda polacz_z_hostem(const std::string& host, int port) {
+  UchwytGniazda gniazdo = socket(AF_INET, SOCK_STREAM, 0);
+  if (gniazdo == kNieprawidloweGniazdo) {
+    std::cerr << "Socket error: " << tekst_bledu_gniazda() << "\n";
+    return kNieprawidloweGniazdo;
   }
 
-  sockaddr_in address{};
-  address.sin_family = AF_INET;
-  address.sin_port = htons(static_cast<uint16_t>(port));
-  if (inet_pton(AF_INET, host.c_str(), &address.sin_addr) <= 0) {
+  sockaddr_in adres{};
+  adres.sin_family = AF_INET;
+  adres.sin_port = htons(static_cast<uint16_t>(port));
+  if (inet_pton(AF_INET, host.c_str(), &adres.sin_addr) <= 0) {
     std::cerr << "Invalid host address: " << host << "\n";
-    close_socket(socket_fd);
-    return kInvalidSocket;
+    zamknij_gniazdo(gniazdo);
+    return kNieprawidloweGniazdo;
   }
 
-  if (connect(socket_fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0) {
-    std::cerr << "Connect error: " << socket_error_text() << "\n";
-    close_socket(socket_fd);
-    return kInvalidSocket;
+  if (connect(gniazdo, reinterpret_cast<sockaddr*>(&adres), sizeof(adres)) < 0) {
+    std::cerr << "Connect error: " << tekst_bledu_gniazda() << "\n";
+    zamknij_gniazdo(gniazdo);
+    return kNieprawidloweGniazdo;
   }
 
-  return socket_fd;
+  return gniazdo;
 }
 
-void handle_signal(int) {
-  running.store(false);
+void obsluz_sygnal(int) {
+  uruchomione.store(false);
 }
 
-void send_line(SocketHandle socket_fd, const std::string& line) {
-  send_all(socket_fd, line + "\n");
+void wyslij_linie(UchwytGniazda gniazdo, const std::string& linia) {
+  wyslij_wszystko(gniazdo, linia + "\n");
 }
 
-class SyncBarrier {
+class BarieraSynchronizacji {
  public:
-  explicit SyncBarrier(int participants) : participants_(participants) {}
+  explicit BarieraSynchronizacji(int uczestnicy) : uczestnicy_(uczestnicy) {}
 
-  bool arrive_and_wait() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    if (!active_) {
+  bool dojdz_i_czekaj() {
+    std::unique_lock<std::mutex> blokada(mutex_);
+    if (!aktywna_) {
       return false;
     }
-    int current_generation = generation_;
-    if (++arrived_ >= participants_) {
-      arrived_ = 0;
-      ++generation_;
-      condition_.notify_all();
-      return active_;
+    int obecna_generacja = generacja_;
+    if (++doszlo_ >= uczestnicy_) {
+      doszlo_ = 0;
+      ++generacja_;
+      warunek_.notify_all();
+      return aktywna_;
     }
-    condition_.wait(lock, [&]() { return generation_ != current_generation || !active_; });
-    return active_;
+    warunek_.wait(blokada, [&]() { return generacja_ != obecna_generacja || !aktywna_; });
+    return aktywna_;
   }
 
-  void stop() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    active_ = false;
-    condition_.notify_all();
+  void zatrzymaj() {
+    std::lock_guard<std::mutex> blokada(mutex_);
+    aktywna_ = false;
+    warunek_.notify_all();
   }
 
  private:
-  int participants_;
-  int arrived_ = 0;
-  int generation_ = 0;
-  bool active_ = true;
+  int uczestnicy_;
+  int doszlo_ = 0;
+  int generacja_ = 0;
+  bool aktywna_ = true;
   std::mutex mutex_;
-  std::condition_variable condition_;
+  std::condition_variable warunek_;
 };
 
-void worker_loop(int thread_id,
-                 const std::string& host,
-                 int port,
-                 int delay_ms,
-                 SyncBarrier* barrier,
-                 std::atomic<uint64_t>& total_sent) {
-  SocketHandle socket_fd = connect_to_host(host, port);
-  if (socket_fd == kInvalidSocket) {
+void petla_pracownika(int id_watku,
+                     const std::string& host,
+                     int port,
+                     int opoznienie_ms,
+                     BarieraSynchronizacji* bariera,
+                     std::atomic<uint64_t>& lacznie_wyslano) {
+  UchwytGniazda gniazdo = polacz_z_hostem(host, port);
+  if (gniazdo == kNieprawidloweGniazdo) {
     return;
   }
 
-  std::ostringstream name_stream;
-  name_stream << "/name load_" << thread_id;
-  send_line(socket_fd, name_stream.str());
+  std::ostringstream strumien_nazwy;
+  strumien_nazwy << "/name load_" << id_watku;
+  wyslij_linie(gniazdo, strumien_nazwy.str());
 
-  uint64_t counter = 0;
-  while (running.load()) {
-    if (barrier != nullptr) {
-      if (!barrier->arrive_and_wait()) {
+  uint64_t licznik = 0;
+  while (uruchomione.load()) {
+    if (bariera != nullptr) {
+      if (!bariera->dojdz_i_czekaj()) {
         break;
       }
     }
-    std::ostringstream message_stream;
-    message_stream << "load-test " << thread_id << " " << counter++;
-    if (!send_all(socket_fd, message_stream.str() + "\n")) {
+    std::ostringstream strumien_wiadomosci;
+    strumien_wiadomosci << "load-test " << id_watku << " " << licznik++;
+    if (!wyslij_wszystko(gniazdo, strumien_wiadomosci.str() + "\n")) {
       break;
     }
-    ++total_sent;
-    if (delay_ms > 0) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+    ++lacznie_wyslano;
+    if (opoznienie_ms > 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(opoznienie_ms));
     }
   }
 
-  close_socket(socket_fd);
+  zamknij_gniazdo(gniazdo);
 }
 }  // namespace
 
-int main(int argc, char* argv[]) {
+int main(int liczba_argumentow, char* argumenty[]) {
   std::string host = "127.0.0.1";
   int port = 5555;
-  int threads = 10;
-  int delay_ms = 10;
-  int duration_sec = 0;
-  bool sync_mode = false;
+  int watki = 10;
+  int opoznienie_ms = 10;
+  int czas_trwania_s = 0;
+  bool tryb_sync = false;
 
-  if (argc >= 2) {
-    host = argv[1];
+  if (liczba_argumentow >= 2) {
+    host = argumenty[1];
   }
-  if (argc >= 3) {
-    port = std::stoi(argv[2]);
+  if (liczba_argumentow >= 3) {
+    port = std::stoi(argumenty[2]);
   }
-  if (argc >= 4) {
-    threads = std::stoi(argv[3]);
+  if (liczba_argumentow >= 4) {
+    watki = std::stoi(argumenty[3]);
   }
-  if (argc >= 5) {
-    delay_ms = std::stoi(argv[4]);
+  if (liczba_argumentow >= 5) {
+    opoznienie_ms = std::stoi(argumenty[4]);
   }
-  if (argc >= 6) {
-    duration_sec = std::stoi(argv[5]);
+  if (liczba_argumentow >= 6) {
+    czas_trwania_s = std::stoi(argumenty[5]);
   }
-  for (int i = 6; i < argc; ++i) {
-    if (std::string(argv[i]) == "--sync") {
-      sync_mode = true;
+  for (int i = 6; i < liczba_argumentow; ++i) {
+    if (std::string(argumenty[i]) == "--sync") {
+      tryb_sync = true;
     }
   }
 
 #ifdef _WIN32
-  WSADATA wsa_data;
-  if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
-    std::cerr << "WSAStartup failed: " << socket_error_text() << "\n";
+  WSADATA dane_wsa;
+  if (WSAStartup(MAKEWORD(2, 2), &dane_wsa) != 0) {
+    std::cerr << "WSAStartup failed: " << tekst_bledu_gniazda() << "\n";
     return 1;
   }
 #endif
 
-  std::signal(SIGINT, handle_signal);
+  std::signal(SIGINT, obsluz_sygnal);
 
-  std::cout << "Starting stress test with " << threads << " threads to " << host << ":" << port
-            << " (delay " << delay_ms << " ms).";
-  if (sync_mode) {
+  std::cout << "Starting stress test with " << watki << " threads to " << host << ":" << port
+            << " (delay " << opoznienie_ms << " ms).";
+  if (tryb_sync) {
     std::cout << " Synchronized burst mode enabled.";
   }
-  if (duration_sec > 0) {
-    std::cout << " Duration: " << duration_sec << "s.";
+  if (czas_trwania_s > 0) {
+    std::cout << " Duration: " << czas_trwania_s << "s.";
   }
   std::cout << " Press Ctrl+C to stop.\n";
 
-  std::atomic<uint64_t> total_sent{0};
-  std::vector<std::thread> workers;
-  workers.reserve(static_cast<size_t>(threads));
-  SyncBarrier barrier(threads);
-  SyncBarrier* barrier_ptr = sync_mode ? &barrier : nullptr;
+  std::atomic<uint64_t> lacznie_wyslano{0};
+  std::vector<std::thread> pracownicy;
+  pracownicy.reserve(static_cast<size_t>(watki));
+  BarieraSynchronizacji bariera(watki);
+  BarieraSynchronizacji* wskaznik_bariery = tryb_sync ? &bariera : nullptr;
 
-  auto start_time = std::chrono::steady_clock::now();
-  for (int i = 0; i < threads; ++i) {
-    workers.emplace_back(worker_loop, i + 1, host, port, delay_ms, barrier_ptr,
-                         std::ref(total_sent));
+  auto czas_startu = std::chrono::steady_clock::now();
+  for (int i = 0; i < watki; ++i) {
+    pracownicy.emplace_back(petla_pracownika, i + 1, host, port, opoznienie_ms, wskaznik_bariery,
+                            std::ref(lacznie_wyslano));
   }
 
-  while (running.load()) {
+  while (uruchomione.load()) {
     std::this_thread::sleep_for(std::chrono::seconds(1));
-    if (duration_sec > 0) {
-      auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-          std::chrono::steady_clock::now() - start_time);
-      if (elapsed.count() >= duration_sec) {
-        running.store(false);
+    if (czas_trwania_s > 0) {
+      auto uplynelo = std::chrono::duration_cast<std::chrono::seconds>(
+          std::chrono::steady_clock::now() - czas_startu);
+      if (uplynelo.count() >= czas_trwania_s) {
+        uruchomione.store(false);
       }
     }
   }
-  if (barrier_ptr != nullptr) {
-    barrier_ptr->stop();
+  if (wskaznik_bariery != nullptr) {
+    wskaznik_bariery->zatrzymaj();
   }
 
-  for (auto& worker : workers) {
-    if (worker.joinable()) {
-      worker.join();
+  for (auto& pracownik : pracownicy) {
+    if (pracownik.joinable()) {
+      pracownik.join();
     }
   }
 
-  std::cout << "Total messages sent: " << total_sent.load() << "\n";
+  std::cout << "Total messages sent: " << lacznie_wyslano.load() << "\n";
 
 #ifdef _WIN32
   WSACleanup();
