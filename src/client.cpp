@@ -31,588 +31,601 @@
 #include <QtWidgets/QVBoxLayout>
 
 namespace {
-constexpr int kMaxRoomLines = 200;
-constexpr int kMaxNotifications = 20;
+constexpr int kMaksLiniiPokoju = 200;
+constexpr int kMaksPowiadomien = 20;
 }
 
-class PrivateChatDialog : public QDialog {
+class PrywatnyCzatDialog : public QDialog {
   Q_OBJECT
 
  public:
-  explicit PrivateChatDialog(const QString& peer, QWidget* parent = nullptr)
-      : QDialog(parent), peer_(peer) {
-    setWindowTitle(QStringLiteral("Private chat: %1").arg(peer_));
+  explicit PrywatnyCzatDialog(const QString& rozmowca, QWidget* rodzic = nullptr)
+      : QDialog(rodzic), rozmowca_(rozmowca) {
+    setWindowTitle(QStringLiteral("Prywatny czat: %1").arg(rozmowca_));
     setMinimumSize(400, 300);
 
-    auto* layout = new QVBoxLayout(this);
-    chat_view_ = new QTextEdit(this);
-    chat_view_->setReadOnly(true);
+    auto* uklad = new QVBoxLayout(this);
+    widok_czatu_ = new QTextEdit(this);
+    widok_czatu_->setReadOnly(true);
 
-    auto* input_layout = new QHBoxLayout();
-    input_ = new QLineEdit(this);
-    send_button_ = new QPushButton(QStringLiteral("Send"), this);
+    auto* uklad_wejscia = new QHBoxLayout();
+    pole_wejscia_ = new QLineEdit(this);
+    przycisk_wyslij_ = new QPushButton(QStringLiteral("Wyślij"), this);
 
-    input_layout->addWidget(input_);
-    input_layout->addWidget(send_button_);
+    uklad_wejscia->addWidget(pole_wejscia_);
+    uklad_wejscia->addWidget(przycisk_wyslij_);
 
-    layout->addWidget(chat_view_);
-    layout->addLayout(input_layout);
+    uklad->addWidget(widok_czatu_);
+    uklad->addLayout(uklad_wejscia);
 
-    connect(send_button_, &QPushButton::clicked, this, &PrivateChatDialog::sendClicked);
-    connect(input_, &QLineEdit::returnPressed, this, &PrivateChatDialog::sendClicked);
+    connect(przycisk_wyslij_, &QPushButton::clicked, this, &PrywatnyCzatDialog::klikniecieWyslij);
+    connect(pole_wejscia_, &QLineEdit::returnPressed, this,
+            &PrywatnyCzatDialog::klikniecieWyslij);
   }
 
-  QString peer() const { return peer_; }
+  QString rozmowca() const { return rozmowca_; }
 
-  void appendMessage(const QString& line) {
-    chat_view_->append(line);
+  void dodajWiadomosc(const QString& linia) {
+    widok_czatu_->append(linia);
   }
 
  signals:
-  void messageReady(const QString& peer, const QString& message);
+  void wiadomoscGotowa(const QString& rozmowca, const QString& wiadomosc);
 
  private slots:
-  void sendClicked() {
-    const QString text = input_->text().trimmed();
-    if (text.isEmpty()) {
+  void klikniecieWyslij() {
+    const QString tekst = pole_wejscia_->text().trimmed();
+    if (tekst.isEmpty()) {
       return;
     }
-    emit messageReady(peer_, text);
-    appendMessage(QStringLiteral("you: %1").arg(text));
-    input_->clear();
+    emit wiadomoscGotowa(rozmowca_, tekst);
+    dodajWiadomosc(QStringLiteral("ty: %1").arg(tekst));
+    pole_wejscia_->clear();
   }
 
  private:
-  QString peer_;
-  QTextEdit* chat_view_ = nullptr;
-  QLineEdit* input_ = nullptr;
-  QPushButton* send_button_ = nullptr;
+  QString rozmowca_;
+  QTextEdit* widok_czatu_ = nullptr;
+  QLineEdit* pole_wejscia_ = nullptr;
+  QPushButton* przycisk_wyslij_ = nullptr;
 };
 
-class ChatWindow : public QMainWindow {
+class OknoCzatu : public QMainWindow {
   Q_OBJECT
 
  public:
-  ChatWindow(const QString& host, int port, QWidget* parent = nullptr)
-      : QMainWindow(parent), host_(host), port_(port) {
+  OknoCzatu(const QString& adres_hosta, int port, QWidget* rodzic = nullptr)
+      : QMainWindow(rodzic), adres_hosta_(adres_hosta), port_(port) {
     setWindowTitle(QStringLiteral("ChatApp"));
     setMinimumSize(1000, 700);
 
-    auto* central = new QWidget(this);
-    setCentralWidget(central);
+    auto* centralny = new QWidget(this);
+    setCentralWidget(centralny);
 
-    auto* main_layout = new QHBoxLayout(central);
+    auto* glowny_uklad = new QHBoxLayout(centralny);
 
-    main_layout->addWidget(buildControlPanel());
-    main_layout->addWidget(buildRoomPanel(), 1);
-    main_layout->addWidget(buildChatPanel(), 2);
+    glowny_uklad->addWidget(zbudujPanelSterowania());
+    glowny_uklad->addWidget(zbudujPanelPokoi(), 1);
+    glowny_uklad->addWidget(zbudujPanelCzatu(), 2);
 
-    buildMenu();
+    zbudujMenu();
 
-    socket_ = new QTcpSocket(this);
-    connect(socket_, &QTcpSocket::readyRead, this, &ChatWindow::onReadyRead);
-    connect(socket_, &QTcpSocket::connected, this, &ChatWindow::onConnected);
-    connect(socket_, &QTcpSocket::disconnected, this, &ChatWindow::onDisconnected);
+    gniazdo_ = new QTcpSocket(this);
+    connect(gniazdo_, &QTcpSocket::readyRead, this, &OknoCzatu::poOdczycie);
+    connect(gniazdo_, &QTcpSocket::connected, this, &OknoCzatu::poPolaczeniu);
+    connect(gniazdo_, &QTcpSocket::disconnected, this, &OknoCzatu::poRozlaczeniu);
 
-    load_timer_ = new QTimer(this);
-    connect(load_timer_, &QTimer::timeout, this, &ChatWindow::sendLoadMessage);
+    timer_ladowania_ = new QTimer(this);
+    connect(timer_ladowania_, &QTimer::timeout, this, &OknoCzatu::wyslijWiadomoscLadujaca);
 
-    socket_->connectToHost(host_, static_cast<quint16>(port_));
+    gniazdo_->connectToHost(adres_hosta_, static_cast<quint16>(port_));
   }
 
  private:
-  QWidget* buildControlPanel() {
+  QWidget* zbudujPanelSterowania() {
     auto* panel = new QWidget(this);
-    auto* layout = new QVBoxLayout(panel);
+    auto* uklad = new QVBoxLayout(panel);
 
-    auto* profile_group = new QGroupBox(QStringLiteral("Profile"), panel);
-    auto* profile_layout = new QFormLayout(profile_group);
-    name_input_ = new QLineEdit(profile_group);
-    auto* name_button = new QPushButton(QStringLiteral("Set name"), profile_group);
-    profile_layout->addRow(QStringLiteral("Nickname"), name_input_);
-    profile_layout->addRow(QString(), name_button);
+    auto* grupa_profilu = new QGroupBox(QStringLiteral("Profil"), panel);
+    auto* uklad_profilu = new QFormLayout(grupa_profilu);
+    pole_nazwy_ = new QLineEdit(grupa_profilu);
+    auto* przycisk_nazwy = new QPushButton(QStringLiteral("Ustaw nazwę"), grupa_profilu);
+    uklad_profilu->addRow(QStringLiteral("Nick"), pole_nazwy_);
+    uklad_profilu->addRow(QString(), przycisk_nazwy);
 
-    connect(name_button, &QPushButton::clicked, this, &ChatWindow::setNickname);
+    connect(przycisk_nazwy, &QPushButton::clicked, this, &OknoCzatu::ustawNick);
 
-    auto* room_group = new QGroupBox(QStringLiteral("Rooms"), panel);
-    auto* room_layout = new QFormLayout(room_group);
-    room_name_input_ = new QLineEdit(room_group);
-    room_pass_input_ = new QLineEdit(room_group);
-    room_pass_input_->setEchoMode(QLineEdit::Password);
-    auto* create_button = new QPushButton(QStringLiteral("Create"), room_group);
-    auto* join_button = new QPushButton(QStringLiteral("Join"), room_group);
+    auto* grupa_pokoi = new QGroupBox(QStringLiteral("Pokoje"), panel);
+    auto* uklad_pokoi = new QFormLayout(grupa_pokoi);
+    pole_nazwy_pokoju_ = new QLineEdit(grupa_pokoi);
+    pole_hasla_pokoju_ = new QLineEdit(grupa_pokoi);
+    pole_hasla_pokoju_->setEchoMode(QLineEdit::Password);
+    auto* przycisk_utworz = new QPushButton(QStringLiteral("Utwórz"), grupa_pokoi);
+    auto* przycisk_dolacz = new QPushButton(QStringLiteral("Dołącz"), grupa_pokoi);
 
-    room_layout->addRow(QStringLiteral("Room"), room_name_input_);
-    room_layout->addRow(QStringLiteral("Password"), room_pass_input_);
-    room_layout->addRow(QString(), create_button);
-    room_layout->addRow(QString(), join_button);
+    uklad_pokoi->addRow(QStringLiteral("Pokój"), pole_nazwy_pokoju_);
+    uklad_pokoi->addRow(QStringLiteral("Hasło"), pole_hasla_pokoju_);
+    uklad_pokoi->addRow(QString(), przycisk_utworz);
+    uklad_pokoi->addRow(QString(), przycisk_dolacz);
 
-    connect(create_button, &QPushButton::clicked, this, &ChatWindow::createRoom);
-    connect(join_button, &QPushButton::clicked, this, &ChatWindow::joinSelectedRoom);
+    connect(przycisk_utworz, &QPushButton::clicked, this, &OknoCzatu::utworzPokoj);
+    connect(przycisk_dolacz, &QPushButton::clicked, this, &OknoCzatu::dolaczDoWybranegoPokoju);
 
-    auto* notifications_group = new QGroupBox(QStringLiteral("Notifications"), panel);
-    auto* notifications_layout = new QVBoxLayout(notifications_group);
-    notifications_list_ = new QListWidget(notifications_group);
-    notifications_layout->addWidget(notifications_list_);
+    auto* grupa_powiadomien = new QGroupBox(QStringLiteral("Powiadomienia"), panel);
+    auto* uklad_powiadomien = new QVBoxLayout(grupa_powiadomien);
+    lista_powiadomien_ = new QListWidget(grupa_powiadomien);
+    uklad_powiadomien->addWidget(lista_powiadomien_);
 
-    connect(notifications_list_, &QListWidget::itemDoubleClicked, this,
-            &ChatWindow::openNotificationChat);
+    connect(lista_powiadomien_, &QListWidget::itemDoubleClicked, this,
+            &OknoCzatu::otworzPowiadomienieCzat);
 
-    auto* test_group = new QGroupBox(QStringLiteral("Test room"), panel);
-    auto* test_layout = new QFormLayout(test_group);
-    test_room_input_ = new QLineEdit(test_group);
-    test_room_input_->setPlaceholderText(QStringLiteral("test-room"));
-    bot_count_input_ = new QSpinBox(test_group);
-    bot_count_input_->setRange(1, 50);
-    bot_count_input_->setValue(5);
-    bot_delay_min_input_ = new QSpinBox(test_group);
-    bot_delay_min_input_->setRange(100, 10000);
-    bot_delay_min_input_->setValue(1000);
-    bot_delay_min_input_->setSuffix(QStringLiteral(" ms"));
-    bot_delay_max_input_ = new QSpinBox(test_group);
-    bot_delay_max_input_->setRange(100, 10000);
-    bot_delay_max_input_->setValue(2500);
-    bot_delay_max_input_->setSuffix(QStringLiteral(" ms"));
-    test_start_button_ = new QPushButton(QStringLiteral("Start"), test_group);
-    test_stop_button_ = new QPushButton(QStringLiteral("Stop"), test_group);
-    test_stop_button_->setEnabled(false);
+    auto* grupa_testowa = new QGroupBox(QStringLiteral("Pokój testowy"), panel);
+    auto* uklad_testowy = new QFormLayout(grupa_testowa);
+    pole_pokoju_testowego_ = new QLineEdit(grupa_testowa);
+    pole_pokoju_testowego_->setPlaceholderText(QStringLiteral("test-room"));
+    pole_liczby_botow_ = new QSpinBox(grupa_testowa);
+    pole_liczby_botow_->setRange(1, 50);
+    pole_liczby_botow_->setValue(5);
+    pole_opoznienia_min_ = new QSpinBox(grupa_testowa);
+    pole_opoznienia_min_->setRange(100, 10000);
+    pole_opoznienia_min_->setValue(1000);
+    pole_opoznienia_min_->setSuffix(QStringLiteral(" ms"));
+    pole_opoznienia_max_ = new QSpinBox(grupa_testowa);
+    pole_opoznienia_max_->setRange(100, 10000);
+    pole_opoznienia_max_->setValue(2500);
+    pole_opoznienia_max_->setSuffix(QStringLiteral(" ms"));
+    przycisk_start_testu_ = new QPushButton(QStringLiteral("Start"), grupa_testowa);
+    przycisk_stop_testu_ = new QPushButton(QStringLiteral("Stop"), grupa_testowa);
+    przycisk_stop_testu_->setEnabled(false);
 
-    auto* test_buttons = new QHBoxLayout();
-    test_buttons->addWidget(test_start_button_);
-    test_buttons->addWidget(test_stop_button_);
+    auto* przyciski_testu = new QHBoxLayout();
+    przyciski_testu->addWidget(przycisk_start_testu_);
+    przyciski_testu->addWidget(przycisk_stop_testu_);
 
-    test_layout->addRow(QStringLiteral("Room"), test_room_input_);
-    test_layout->addRow(QStringLiteral("Bots"), bot_count_input_);
-    test_layout->addRow(QStringLiteral("Bot delay min"), bot_delay_min_input_);
-    test_layout->addRow(QStringLiteral("Bot delay max"), bot_delay_max_input_);
-    test_layout->addRow(test_buttons);
+    uklad_testowy->addRow(QStringLiteral("Pokój"), pole_pokoju_testowego_);
+    uklad_testowy->addRow(QStringLiteral("Boty"), pole_liczby_botow_);
+    uklad_testowy->addRow(QStringLiteral("Opóźnienie bota min"), pole_opoznienia_min_);
+    uklad_testowy->addRow(QStringLiteral("Opóźnienie bota max"), pole_opoznienia_max_);
+    uklad_testowy->addRow(przyciski_testu);
 
-    connect(test_start_button_, &QPushButton::clicked, this, &ChatWindow::startTestRoom);
-    connect(test_stop_button_, &QPushButton::clicked, this, &ChatWindow::stopTestRoom);
+    connect(przycisk_start_testu_, &QPushButton::clicked, this, &OknoCzatu::uruchomPokojTestowy);
+    connect(przycisk_stop_testu_, &QPushButton::clicked, this, &OknoCzatu::zatrzymajPokojTestowy);
 
-    layout->addWidget(profile_group);
-    layout->addWidget(room_group);
-    layout->addWidget(test_group);
-    layout->addWidget(notifications_group, 1);
-    layout->addStretch();
+    uklad->addWidget(grupa_profilu);
+    uklad->addWidget(grupa_pokoi);
+    uklad->addWidget(grupa_testowa);
+    uklad->addWidget(grupa_powiadomien, 1);
+    uklad->addStretch();
     return panel;
   }
 
-  QWidget* buildRoomPanel() {
+  QWidget* zbudujPanelPokoi() {
     auto* panel = new QWidget(this);
-    auto* layout = new QVBoxLayout(panel);
+    auto* uklad = new QVBoxLayout(panel);
 
-    auto* label = new QLabel(QStringLiteral("Rooms (center list)"), panel);
-    label->setAlignment(Qt::AlignCenter);
+    auto* etykieta = new QLabel(QStringLiteral("Pokoje (lista w środku)"), panel);
+    etykieta->setAlignment(Qt::AlignCenter);
 
-    room_list_ = new QListWidget(panel);
-    room_list_->setSelectionMode(QAbstractItemView::SingleSelection);
+    lista_pokoi_ = new QListWidget(panel);
+    lista_pokoi_->setSelectionMode(QAbstractItemView::SingleSelection);
 
-    connect(room_list_, &QListWidget::itemDoubleClicked, this, &ChatWindow::joinRoomFromItem);
+    connect(lista_pokoi_, &QListWidget::itemDoubleClicked, this,
+            &OknoCzatu::dolaczDoPokojuZElementu);
 
-    layout->addWidget(label);
-    layout->addWidget(room_list_, 1);
+    uklad->addWidget(etykieta);
+    uklad->addWidget(lista_pokoi_, 1);
     return panel;
   }
 
-  QWidget* buildChatPanel() {
+  QWidget* zbudujPanelCzatu() {
     auto* panel = new QWidget(this);
-    auto* layout = new QVBoxLayout(panel);
+    auto* uklad = new QVBoxLayout(panel);
 
-    current_room_label_ = new QLabel(QStringLiteral("Current room: Lobby"), panel);
-    room_chat_view_ = new QTextEdit(panel);
-    room_chat_view_->setReadOnly(true);
+    etykieta_aktualnego_pokoju_ = new QLabel(QStringLiteral("Aktualny pokój: Lobby"), panel);
+    widok_czatu_pokoju_ = new QTextEdit(panel);
+    widok_czatu_pokoju_->setReadOnly(true);
 
-    auto* input_layout = new QHBoxLayout();
-    message_input_ = new QLineEdit(panel);
-    send_button_ = new QPushButton(QStringLiteral("Send"), panel);
+    auto* uklad_wejscia = new QHBoxLayout();
+    pole_wiadomosci_ = new QLineEdit(panel);
+    przycisk_wyslij_ = new QPushButton(QStringLiteral("Wyślij"), panel);
 
-    input_layout->addWidget(message_input_, 1);
-    input_layout->addWidget(send_button_);
+    uklad_wejscia->addWidget(pole_wiadomosci_, 1);
+    uklad_wejscia->addWidget(przycisk_wyslij_);
 
-    connect(send_button_, &QPushButton::clicked, this, &ChatWindow::sendRoomMessage);
-    connect(message_input_, &QLineEdit::returnPressed, this, &ChatWindow::sendRoomMessage);
+    connect(przycisk_wyslij_, &QPushButton::clicked, this, &OknoCzatu::wyslijWiadomoscPokoju);
+    connect(pole_wiadomosci_, &QLineEdit::returnPressed, this,
+            &OknoCzatu::wyslijWiadomoscPokoju);
 
-    layout->addWidget(current_room_label_);
-    layout->addWidget(room_chat_view_, 1);
-    layout->addLayout(input_layout);
+    uklad->addWidget(etykieta_aktualnego_pokoju_);
+    uklad->addWidget(widok_czatu_pokoju_, 1);
+    uklad->addLayout(uklad_wejscia);
 
     return panel;
   }
 
-  void buildMenu() {
-    auto* private_menu = menuBar()->addMenu(QStringLiteral("Private chats"));
-    auto* open_action = new QAction(QStringLiteral("Open chat..."), this);
-    private_menu->addAction(open_action);
-    connect(open_action, &QAction::triggered, this, &ChatWindow::openPrivateChatPrompt);
+  void zbudujMenu() {
+    auto* menu_prywatne = menuBar()->addMenu(QStringLiteral("Prywatne czaty"));
+    auto* akcja_otworz = new QAction(QStringLiteral("Otwórz czat..."), this);
+    menu_prywatne->addAction(akcja_otworz);
+    connect(akcja_otworz, &QAction::triggered, this, &OknoCzatu::zapytajPrywatnyCzat);
   }
 
-  void appendRoomLine(const QString& line) {
-    room_chat_view_->append(line);
-    auto* doc = room_chat_view_->document();
-    if (doc->blockCount() > kMaxRoomLines) {
-      QTextCursor cursor(doc);
-      cursor.movePosition(QTextCursor::Start);
-      cursor.select(QTextCursor::BlockUnderCursor);
-      cursor.removeSelectedText();
-      cursor.deleteChar();
+  void dodajLiniePokoju(const QString& linia) {
+    widok_czatu_pokoju_->append(linia);
+    auto* dokument = widok_czatu_pokoju_->document();
+    if (dokument->blockCount() > kMaksLiniiPokoju) {
+      QTextCursor kursor(dokument);
+      kursor.movePosition(QTextCursor::Start);
+      kursor.select(QTextCursor::BlockUnderCursor);
+      kursor.removeSelectedText();
+      kursor.deleteChar();
     }
   }
 
-  void addNotification(const QString& sender, const QString& message) {
-    auto* item = new QListWidgetItem(
-        QStringLiteral("%1: %2").arg(sender, message.left(80)), notifications_list_);
-    item->setData(Qt::UserRole, sender);
-    notifications_list_->insertItem(0, item);
-    while (notifications_list_->count() > kMaxNotifications) {
-      delete notifications_list_->takeItem(notifications_list_->count() - 1);
+  void dodajPowiadomienie(const QString& nadawca, const QString& wiadomosc) {
+    auto* element = new QListWidgetItem(
+        QStringLiteral("%1: %2").arg(nadawca, wiadomosc.left(80)), lista_powiadomien_);
+    element->setData(Qt::UserRole, nadawca);
+    lista_powiadomien_->insertItem(0, element);
+    while (lista_powiadomien_->count() > kMaksPowiadomien) {
+      delete lista_powiadomien_->takeItem(lista_powiadomien_->count() - 1);
     }
   }
 
-  void openPrivateChat(const QString& user) {
-    if (user.isEmpty()) {
+  void otworzPrywatnyCzat(const QString& uzytkownik) {
+    if (uzytkownik.isEmpty()) {
       return;
     }
-    auto* dialog = private_chats_.value(user, nullptr);
+    auto* dialog = prywatne_czaty_.value(uzytkownik, nullptr);
     if (!dialog) {
-      dialog = new PrivateChatDialog(user, this);
-      connect(dialog, &PrivateChatDialog::messageReady, this, &ChatWindow::sendPrivateMessage);
-      private_chats_.insert(user, dialog);
+      dialog = new PrywatnyCzatDialog(uzytkownik, this);
+      connect(dialog, &PrywatnyCzatDialog::wiadomoscGotowa, this,
+              &OknoCzatu::wyslijPrywatnaWiadomosc);
+      prywatne_czaty_.insert(uzytkownik, dialog);
     }
     dialog->show();
     dialog->raise();
     dialog->activateWindow();
   }
 
-  void updateRooms(const QString& payload) {
-    room_list_->clear();
-    const QStringList tokens = payload.split('|', Qt::SkipEmptyParts);
-    for (int i = 0; i + 1 < tokens.size(); i += 2) {
-      const QString name = tokens.at(i);
-      const QString status = tokens.at(i + 1);
-      const bool locked = status == QStringLiteral("locked");
-      auto* item = new QListWidgetItem(
-          QStringLiteral("%1%2").arg(name, locked ? QStringLiteral(" (locked)") : QString()),
-          room_list_);
-      item->setData(Qt::UserRole, name);
-      item->setData(Qt::UserRole + 1, locked);
+  void aktualizujPokoje(const QString& ladunek) {
+    lista_pokoi_->clear();
+    const QStringList tokeny = ladunek.split('|', Qt::SkipEmptyParts);
+    for (int i = 0; i + 1 < tokeny.size(); i += 2) {
+      const QString nazwa = tokeny.at(i);
+      const QString status = tokeny.at(i + 1);
+      const bool zablokowany = status == QStringLiteral("locked");
+      auto* element = new QListWidgetItem(
+          QStringLiteral("%1%2").arg(nazwa, zablokowany ? QStringLiteral(" (locked)") : QString()),
+          lista_pokoi_);
+      element->setData(Qt::UserRole, nazwa);
+      element->setData(Qt::UserRole + 1, zablokowany);
     }
   }
 
-  void handlePrivateMessage(const QString& line) {
-    QString payload = line.mid(QStringLiteral("[private]").size()).trimmed();
-    const int colon_index = payload.indexOf(":");
-    if (colon_index <= 0) {
-      appendRoomLine(line);
+  void obsluzPrywatnaWiadomosc(const QString& linia) {
+    QString ladunek = linia.mid(QStringLiteral("[private]").size()).trimmed();
+    const int indeks_dwukropka = ladunek.indexOf(":");
+    if (indeks_dwukropka <= 0) {
+      dodajLiniePokoju(linia);
       return;
     }
-    const QString sender = payload.left(colon_index).trimmed();
-    const QString message = payload.mid(colon_index + 1).trimmed();
+    const QString nadawca = ladunek.left(indeks_dwukropka).trimmed();
+    const QString wiadomosc = ladunek.mid(indeks_dwukropka + 1).trimmed();
 
-    auto* dialog = private_chats_.value(sender, nullptr);
+    auto* dialog = prywatne_czaty_.value(nadawca, nullptr);
     if (dialog) {
-      dialog->appendMessage(QStringLiteral("%1: %2").arg(sender, message));
+      dialog->dodajWiadomosc(QStringLiteral("%1: %2").arg(nadawca, wiadomosc));
     }
 
-    addNotification(sender, message);
+    dodajPowiadomienie(nadawca, wiadomosc);
   }
 
-  void sendLine(const QString& line) {
-    if (socket_->state() != QAbstractSocket::ConnectedState) {
-      QMessageBox::warning(this, QStringLiteral("Connection"),
-                           QStringLiteral("Not connected to server."));
+  void wyslijLinie(const QString& linia) {
+    if (gniazdo_->state() != QAbstractSocket::ConnectedState) {
+      QMessageBox::warning(this, QStringLiteral("Połączenie"),
+                           QStringLiteral("Brak połączenia z serwerem."));
       return;
     }
-    const QByteArray data = (line + "\n").toUtf8();
-    socket_->write(data);
+    const QByteArray dane = (linia + "\n").toUtf8();
+    gniazdo_->write(dane);
   }
 
  private slots:
-  void onConnected() {
-    appendRoomLine(
-        QStringLiteral("Connected to %1:%2.").arg(host_).arg(port_));
-    sendLine(QStringLiteral("/rooms"));
+  void poPolaczeniu() {
+    dodajLiniePokoju(
+        QStringLiteral("Połączono z %1:%2.").arg(adres_hosta_).arg(port_));
+    wyslijLinie(QStringLiteral("/rooms"));
   }
 
-  void onDisconnected() {
-    appendRoomLine(QStringLiteral("Disconnected from server."));
-    stopTestRoom();
+  void poRozlaczeniu() {
+    dodajLiniePokoju(QStringLiteral("Rozłączono z serwerem."));
+    zatrzymajPokojTestowy();
   }
 
-  void onReadyRead() {
-    buffer_.append(socket_->readAll());
+  void poOdczycie() {
+    bufor_.append(gniazdo_->readAll());
     while (true) {
-      int newline_index = buffer_.indexOf('\n');
-      if (newline_index < 0) {
+      int indeks_nowej_linii = bufor_.indexOf('\n');
+      if (indeks_nowej_linii < 0) {
         break;
       }
-      const QByteArray line_data = buffer_.left(newline_index);
-      buffer_.remove(0, newline_index + 1);
-      const QString line = QString::fromUtf8(line_data).trimmed();
-      if (line.isEmpty()) {
+      const QByteArray dane_linii = bufor_.left(indeks_nowej_linii);
+      bufor_.remove(0, indeks_nowej_linii + 1);
+      const QString linia = QString::fromUtf8(dane_linii).trimmed();
+      if (linia.isEmpty()) {
         continue;
       }
-      if (line.startsWith(QStringLiteral("ROOMS|"))) {
-        updateRooms(line.mid(6));
+      if (linia.startsWith(QStringLiteral("ROOMS|"))) {
+        aktualizujPokoje(linia.mid(6));
         continue;
       }
-      if (line.startsWith(QStringLiteral("ROOM|"))) {
-        const QString room = line.mid(5).trimmed();
-        current_room_label_->setText(QStringLiteral("Current room: %1").arg(room));
+      if (linia.startsWith(QStringLiteral("ROOM|"))) {
+        const QString pokoj = linia.mid(5).trimmed();
+        etykieta_aktualnego_pokoju_->setText(QStringLiteral("Aktualny pokój: %1").arg(pokoj));
         continue;
       }
-      if (line.startsWith(QStringLiteral("[private]"))) {
-        handlePrivateMessage(line);
+      if (linia.startsWith(QStringLiteral("[private]"))) {
+        obsluzPrywatnaWiadomosc(linia);
         continue;
       }
-      appendRoomLine(line);
+      dodajLiniePokoju(linia);
     }
   }
 
-  void sendRoomMessage() {
-    const QString message = message_input_->text().trimmed();
-    if (message.isEmpty()) {
+  void wyslijWiadomoscPokoju() {
+    const QString wiadomosc = pole_wiadomosci_->text().trimmed();
+    if (wiadomosc.isEmpty()) {
       return;
     }
-    sendLine(message);
-    message_input_->clear();
+    wyslijLinie(wiadomosc);
+    pole_wiadomosci_->clear();
   }
 
-  void setNickname() {
-    const QString name = name_input_->text().trimmed();
-    if (name.isEmpty()) {
+  void ustawNick() {
+    const QString nazwa = pole_nazwy_->text().trimmed();
+    if (nazwa.isEmpty()) {
       return;
     }
-    sendLine(QStringLiteral("/name %1").arg(name));
+    wyslijLinie(QStringLiteral("/name %1").arg(nazwa));
   }
 
-  void createRoom() {
-    const QString name = room_name_input_->text().trimmed();
-    const QString pass = room_pass_input_->text().trimmed();
-    if (name.isEmpty()) {
-      QMessageBox::information(this, QStringLiteral("Rooms"),
-                               QStringLiteral("Room name is required."));
+  void utworzPokoj() {
+    const QString nazwa = pole_nazwy_pokoju_->text().trimmed();
+    const QString haslo = pole_hasla_pokoju_->text().trimmed();
+    if (nazwa.isEmpty()) {
+      QMessageBox::information(this, QStringLiteral("Pokoje"),
+                               QStringLiteral("Nazwa pokoju jest wymagana."));
       return;
     }
-    QString command = QStringLiteral("/create %1").arg(name);
-    if (!pass.isEmpty()) {
-      command += QStringLiteral(" %1").arg(pass);
+    QString komenda = QStringLiteral("/create %1").arg(nazwa);
+    if (!haslo.isEmpty()) {
+      komenda += QStringLiteral(" %1").arg(haslo);
     }
-    sendLine(command);
+    wyslijLinie(komenda);
   }
 
-  void joinSelectedRoom() {
-    QListWidgetItem* item = room_list_->currentItem();
-    if (!item) {
-      QMessageBox::information(this, QStringLiteral("Rooms"),
-                               QStringLiteral("Select a room from the list."));
+  void dolaczDoWybranegoPokoju() {
+    QListWidgetItem* element = lista_pokoi_->currentItem();
+    if (!element) {
+      QMessageBox::information(this, QStringLiteral("Pokoje"),
+                               QStringLiteral("Wybierz pokój z listy."));
       return;
     }
-    joinRoomFromItem(item);
+    dolaczDoPokojuZElementu(element);
   }
 
-  void joinRoomFromItem(QListWidgetItem* item) {
-    const QString name = item->data(Qt::UserRole).toString();
-    const bool locked = item->data(Qt::UserRole + 1).toBool();
-    QString pass = room_pass_input_->text().trimmed();
-    if (locked && pass.isEmpty()) {
-      pass = QInputDialog::getText(this,
-                                   QStringLiteral("Room password"),
-                                   QStringLiteral("Enter password for %1").arg(name),
+  void dolaczDoPokojuZElementu(QListWidgetItem* element) {
+    const QString nazwa = element->data(Qt::UserRole).toString();
+    const bool zablokowany = element->data(Qt::UserRole + 1).toBool();
+    QString haslo = pole_hasla_pokoju_->text().trimmed();
+    if (zablokowany && haslo.isEmpty()) {
+      haslo = QInputDialog::getText(this,
+                                   QStringLiteral("Hasło pokoju"),
+                                   QStringLiteral("Podaj hasło do %1").arg(nazwa),
                                    QLineEdit::Password);
     }
-    QString command = QStringLiteral("/join %1").arg(name);
-    if (!pass.isEmpty()) {
-      command += QStringLiteral(" %1").arg(pass);
+    QString komenda = QStringLiteral("/join %1").arg(nazwa);
+    if (!haslo.isEmpty()) {
+      komenda += QStringLiteral(" %1").arg(haslo);
     }
-    sendLine(command);
+    wyslijLinie(komenda);
   }
 
-  void openNotificationChat(QListWidgetItem* item) {
-    if (!item) {
+  void otworzPowiadomienieCzat(QListWidgetItem* element) {
+    if (!element) {
       return;
     }
-    const QString sender = item->data(Qt::UserRole).toString();
-    delete notifications_list_->takeItem(notifications_list_->row(item));
-    openPrivateChat(sender);
+    const QString nadawca = element->data(Qt::UserRole).toString();
+    delete lista_powiadomien_->takeItem(lista_powiadomien_->row(element));
+    otworzPrywatnyCzat(nadawca);
   }
 
-  void openPrivateChatPrompt() {
+  void zapytajPrywatnyCzat() {
     bool ok = false;
-    const QString user = QInputDialog::getText(
-        this, QStringLiteral("Private chat"), QStringLiteral("User name"), QLineEdit::Normal,
-        QString(), &ok);
-    if (ok && !user.trimmed().isEmpty()) {
-      openPrivateChat(user.trimmed());
+    const QString uzytkownik = QInputDialog::getText(
+        this, QStringLiteral("Prywatny czat"), QStringLiteral("Nazwa użytkownika"),
+        QLineEdit::Normal, QString(), &ok);
+    if (ok && !uzytkownik.trimmed().isEmpty()) {
+      otworzPrywatnyCzat(uzytkownik.trimmed());
     }
   }
 
-  void sendPrivateMessage(const QString& peer, const QString& message) {
-    sendLine(QStringLiteral("/msg %1 %2").arg(peer, message));
+  void wyslijPrywatnaWiadomosc(const QString& rozmowca, const QString& wiadomosc) {
+    wyslijLinie(QStringLiteral("/msg %1 %2").arg(rozmowca, wiadomosc));
   }
 
-  void startTestRoom() {
-    if (socket_->state() != QAbstractSocket::ConnectedState) {
-      QMessageBox::warning(this, QStringLiteral("Connection"),
-                           QStringLiteral("Not connected to server."));
+  void uruchomPokojTestowy() {
+    if (gniazdo_->state() != QAbstractSocket::ConnectedState) {
+      QMessageBox::warning(this, QStringLiteral("Połączenie"),
+                           QStringLiteral("Brak połączenia z serwerem."));
       return;
     }
-    if (test_active_) {
+    if (test_aktywny_) {
       return;
     }
-    QString room = test_room_input_->text().trimmed();
-    if (room.isEmpty()) {
-      room = QStringLiteral("test-room");
-      test_room_input_->setText(room);
+    QString pokoj = pole_pokoju_testowego_->text().trimmed();
+    if (pokoj.isEmpty()) {
+      pokoj = QStringLiteral("test-room");
+      pole_pokoju_testowego_->setText(pokoj);
     }
 
-    test_active_ = true;
-    test_start_button_->setEnabled(false);
-    test_stop_button_->setEnabled(true);
-    ++bot_run_id_;
+    test_aktywny_ = true;
+    przycisk_start_testu_->setEnabled(false);
+    przycisk_stop_testu_->setEnabled(true);
+    ++numer_uruchomienia_botow_;
 
-    sendLine(QStringLiteral("/create %1").arg(room));
-    sendLine(QStringLiteral("/join %1").arg(room));
+    wyslijLinie(QStringLiteral("/create %1").arg(pokoj));
+    wyslijLinie(QStringLiteral("/join %1").arg(pokoj));
 
-    const int bot_count = bot_count_input_->value();
-    int min_delay = bot_delay_min_input_->value();
-    int max_delay = bot_delay_max_input_->value();
-    if (min_delay > max_delay) {
-      std::swap(min_delay, max_delay);
-      bot_delay_min_input_->setValue(min_delay);
-      bot_delay_max_input_->setValue(max_delay);
+    const int liczba_botow = pole_liczby_botow_->value();
+    int opoznienie_min = pole_opoznienia_min_->value();
+    int opoznienie_max = pole_opoznienia_max_->value();
+    if (opoznienie_min > opoznienie_max) {
+      std::swap(opoznienie_min, opoznienie_max);
+      pole_opoznienia_min_->setValue(opoznienie_min);
+      pole_opoznienia_max_->setValue(opoznienie_max);
     }
-    for (int i = 1; i <= bot_count; ++i) {
-      createBot(room, i, min_delay, max_delay);
+    for (int i = 1; i <= liczba_botow; ++i) {
+      utworzBota(pokoj, i, opoznienie_min, opoznienie_max);
     }
   }
 
-  void stopTestRoom() {
-    if (!test_active_ && bot_sockets_.isEmpty()) {
+  void zatrzymajPokojTestowy() {
+    if (!test_aktywny_ && gniazda_botow_.isEmpty()) {
       return;
     }
-    test_active_ = false;
-    test_start_button_->setEnabled(true);
-    test_stop_button_->setEnabled(false);
+    test_aktywny_ = false;
+    przycisk_start_testu_->setEnabled(true);
+    przycisk_stop_testu_->setEnabled(false);
 
-    for (auto it = bot_timers_.begin(); it != bot_timers_.end(); ++it) {
+    for (auto it = timery_botow_.begin(); it != timery_botow_.end(); ++it) {
       if (it.value()) {
         it.value()->stop();
         it.value()->deleteLater();
       }
     }
-    bot_timers_.clear();
-    bot_message_counts_.clear();
+    timery_botow_.clear();
+    liczniki_wiadomosci_botow_.clear();
 
-    for (auto* bot : bot_sockets_) {
+    for (auto* bot : gniazda_botow_) {
       if (bot) {
         bot->disconnectFromHost();
         bot->deleteLater();
       }
     }
-    bot_sockets_.clear();
+    gniazda_botow_.clear();
   }
 
-  void createBot(const QString& room, int index, int min_delay, int max_delay) {
+  void utworzBota(const QString& pokoj, int indeks, int opoznienie_min, int opoznienie_max) {
     auto* bot = new QTcpSocket(this);
-    bot_sockets_.append(bot);
-    const QString bot_name = QStringLiteral("Bot%1-%2").arg(index).arg(bot_run_id_);
+    gniazda_botow_.append(bot);
+    const QString nazwa_bota = QStringLiteral("Bot%1-%2").arg(indeks).arg(numer_uruchomienia_botow_);
 
-    connect(bot, &QTcpSocket::connected, this, [this, bot, bot_name, room, min_delay, max_delay]() {
-      sendBotLine(bot, QStringLiteral("/name %1").arg(bot_name));
-      sendBotLine(bot, QStringLiteral("/join %1").arg(room));
-      bot_message_counts_[bot] = 0;
+    connect(bot, &QTcpSocket::connected, this,
+            [this, bot, nazwa_bota, pokoj, opoznienie_min, opoznienie_max]() {
+      wyslijLinieBota(bot, QStringLiteral("/name %1").arg(nazwa_bota));
+      wyslijLinieBota(bot, QStringLiteral("/join %1").arg(pokoj));
+      liczniki_wiadomosci_botow_[bot] = 0;
       auto* timer = new QTimer(bot);
       timer->setSingleShot(true);
-      connect(timer, &QTimer::timeout, this, [this, bot, bot_name, min_delay, max_delay, timer]() {
+      connect(timer, &QTimer::timeout, this,
+              [this, bot, nazwa_bota, opoznienie_min, opoznienie_max, timer]() {
         if (!bot || bot->state() != QAbstractSocket::ConnectedState) {
           return;
         }
-        const int next_message = ++bot_message_counts_[bot];
-        sendBotLine(
+        const int nastepna_wiadomosc = ++liczniki_wiadomosci_botow_[bot];
+        wyslijLinieBota(
             bot,
-            QStringLiteral("[%1] message %2").arg(bot_name).arg(next_message));
-        if (min_delay > 0 && max_delay >= min_delay) {
-          const int delay = QRandomGenerator::global()->bounded(min_delay, max_delay + 1);
-          timer->start(delay);
+            QStringLiteral("[%1] wiadomość %2").arg(nazwa_bota).arg(nastepna_wiadomosc));
+        if (opoznienie_min > 0 && opoznienie_max >= opoznienie_min) {
+          const int opoznienie = QRandomGenerator::global()->bounded(opoznienie_min,
+                                                                     opoznienie_max + 1);
+          timer->start(opoznienie);
         }
       });
-      bot_timers_.insert(bot, timer);
-      if (min_delay > 0 && max_delay >= min_delay) {
-        const int delay = QRandomGenerator::global()->bounded(min_delay, max_delay + 1);
-        timer->start(delay);
+      timery_botow_.insert(bot, timer);
+      if (opoznienie_min > 0 && opoznienie_max >= opoznienie_min) {
+        const int opoznienie = QRandomGenerator::global()->bounded(opoznienie_min,
+                                                                   opoznienie_max + 1);
+        timer->start(opoznienie);
       }
     });
     connect(bot, &QTcpSocket::disconnected, this, [this, bot]() {
-      if (bot_timers_.contains(bot)) {
-        bot_timers_[bot]->stop();
-        bot_timers_[bot]->deleteLater();
-        bot_timers_.remove(bot);
+      if (timery_botow_.contains(bot)) {
+        timery_botow_[bot]->stop();
+        timery_botow_[bot]->deleteLater();
+        timery_botow_.remove(bot);
       }
-      bot_message_counts_.remove(bot);
-      bot_sockets_.removeAll(bot);
+      liczniki_wiadomosci_botow_.remove(bot);
+      gniazda_botow_.removeAll(bot);
       bot->deleteLater();
     });
 
-    bot->connectToHost(host_, static_cast<quint16>(port_));
+    bot->connectToHost(adres_hosta_, static_cast<quint16>(port_));
   }
 
-  void sendBotLine(QTcpSocket* bot, const QString& line) {
+  void wyslijLinieBota(QTcpSocket* bot, const QString& linia) {
     if (!bot || bot->state() != QAbstractSocket::ConnectedState) {
       return;
     }
-    const QByteArray data = (line + "\n").toUtf8();
-    bot->write(data);
+    const QByteArray dane = (linia + "\n").toUtf8();
+    bot->write(dane);
+  }
+
+  void wyslijWiadomoscLadujaca() {
+    Q_UNUSED(timer_ladowania_);
   }
 
  private:
-  QString host_;
+  QString adres_hosta_;
   int port_ = 0;
-  QTcpSocket* socket_ = nullptr;
-  QByteArray buffer_;
+  QTcpSocket* gniazdo_ = nullptr;
+  QByteArray bufor_;
 
-  QLineEdit* name_input_ = nullptr;
-  QLineEdit* room_name_input_ = nullptr;
-  QLineEdit* room_pass_input_ = nullptr;
+  QLineEdit* pole_nazwy_ = nullptr;
+  QLineEdit* pole_nazwy_pokoju_ = nullptr;
+  QLineEdit* pole_hasla_pokoju_ = nullptr;
+  QTimer* timer_ladowania_ = nullptr;
 
-  QListWidget* room_list_ = nullptr;
-  QListWidget* notifications_list_ = nullptr;
-  QTextEdit* room_chat_view_ = nullptr;
-  QLabel* current_room_label_ = nullptr;
-  QLineEdit* message_input_ = nullptr;
-  QPushButton* send_button_ = nullptr;
-  QLineEdit* test_room_input_ = nullptr;
-  QSpinBox* bot_count_input_ = nullptr;
-  QSpinBox* bot_delay_min_input_ = nullptr;
-  QSpinBox* bot_delay_max_input_ = nullptr;
-  QPushButton* test_start_button_ = nullptr;
-  QPushButton* test_stop_button_ = nullptr;
-  QVector<QTcpSocket*> bot_sockets_;
-  QHash<QTcpSocket*, QTimer*> bot_timers_;
-  QHash<QTcpSocket*, int> bot_message_counts_;
-  bool test_active_ = false;
-  int bot_run_id_ = 0;
+  QListWidget* lista_pokoi_ = nullptr;
+  QListWidget* lista_powiadomien_ = nullptr;
+  QTextEdit* widok_czatu_pokoju_ = nullptr;
+  QLabel* etykieta_aktualnego_pokoju_ = nullptr;
+  QLineEdit* pole_wiadomosci_ = nullptr;
+  QPushButton* przycisk_wyslij_ = nullptr;
+  QLineEdit* pole_pokoju_testowego_ = nullptr;
+  QSpinBox* pole_liczby_botow_ = nullptr;
+  QSpinBox* pole_opoznienia_min_ = nullptr;
+  QSpinBox* pole_opoznienia_max_ = nullptr;
+  QPushButton* przycisk_start_testu_ = nullptr;
+  QPushButton* przycisk_stop_testu_ = nullptr;
+  QVector<QTcpSocket*> gniazda_botow_;
+  QHash<QTcpSocket*, QTimer*> timery_botow_;
+  QHash<QTcpSocket*, int> liczniki_wiadomosci_botow_;
+  bool test_aktywny_ = false;
+  int numer_uruchomienia_botow_ = 0;
 
-  QMap<QString, PrivateChatDialog*> private_chats_;
+  QMap<QString, PrywatnyCzatDialog*> prywatne_czaty_;
 };
 
-int main(int argc, char* argv[]) {
-  QApplication app(argc, argv);
+int main(int liczba_argumentow, char* argumenty[]) {
+  QApplication aplikacja(liczba_argumentow, argumenty);
 
-  QString host = QStringLiteral("127.0.0.1");
+  QString adres_hosta = QStringLiteral("127.0.0.1");
   int port = 5555;
 
-  if (argc >= 2) {
-    host = QString::fromLocal8Bit(argv[1]);
+  if (liczba_argumentow >= 2) {
+    adres_hosta = QString::fromLocal8Bit(argumenty[1]);
   }
-  if (argc >= 3) {
-    port = QString::fromLocal8Bit(argv[2]).toInt();
+  if (liczba_argumentow >= 3) {
+    port = QString::fromLocal8Bit(argumenty[2]).toInt();
   }
 
-  ChatWindow window(host, port);
-  window.show();
+  OknoCzatu okno(adres_hosta, port);
+  okno.show();
 
-  return app.exec();
+  return aplikacja.exec();
 }
 
 #include "client.moc"
