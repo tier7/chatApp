@@ -41,7 +41,7 @@ class PrywatnyCzatDialog : public QDialog {
  public:
   explicit PrywatnyCzatDialog(const QString& rozmowca, QWidget* rodzic = nullptr)
       : QDialog(rodzic), rozmowca_(rozmowca) {
-    setWindowTitle(QStringLiteral("Private chat: %1").arg(rozmowca_));
+    setWindowTitle(QStringLiteral("Prywatny czat: %1").arg(rozmowca_));
     setMinimumSize(400, 300);
 
     auto* uklad = new QVBoxLayout(this);
@@ -50,7 +50,7 @@ class PrywatnyCzatDialog : public QDialog {
 
     auto* uklad_wejscia = new QHBoxLayout();
     pole_wejscia_ = new QLineEdit(this);
-    przycisk_wyslij_ = new QPushButton(QStringLiteral("Send"), this);
+    przycisk_wyslij_ = new QPushButton(QStringLiteral("Wyślij"), this);
 
     uklad_wejscia->addWidget(pole_wejscia_);
     uklad_wejscia->addWidget(przycisk_wyslij_);
@@ -79,7 +79,7 @@ class PrywatnyCzatDialog : public QDialog {
       return;
     }
     emit wiadomoscGotowa(rozmowca_, tekst);
-    dodajWiadomosc(QStringLiteral("you: %1").arg(tekst));
+    dodajWiadomosc(QStringLiteral("ty: %1").arg(tekst));
     pole_wejscia_->clear();
   }
 
@@ -126,32 +126,32 @@ class OknoCzatu : public QMainWindow {
     auto* panel = new QWidget(this);
     auto* uklad = new QVBoxLayout(panel);
 
-    auto* grupa_profilu = new QGroupBox(QStringLiteral("Profile"), panel);
+    auto* grupa_profilu = new QGroupBox(QStringLiteral("Profil"), panel);
     auto* uklad_profilu = new QFormLayout(grupa_profilu);
     pole_nazwy_ = new QLineEdit(grupa_profilu);
-    auto* przycisk_nazwy = new QPushButton(QStringLiteral("Set name"), grupa_profilu);
-    uklad_profilu->addRow(QStringLiteral("Nickname"), pole_nazwy_);
+    auto* przycisk_nazwy = new QPushButton(QStringLiteral("Ustaw nazwę"), grupa_profilu);
+    uklad_profilu->addRow(QStringLiteral("Nick"), pole_nazwy_);
     uklad_profilu->addRow(QString(), przycisk_nazwy);
 
     connect(przycisk_nazwy, &QPushButton::clicked, this, &OknoCzatu::ustawNick);
 
-    auto* grupa_pokoi = new QGroupBox(QStringLiteral("Rooms"), panel);
+    auto* grupa_pokoi = new QGroupBox(QStringLiteral("Pokoje"), panel);
     auto* uklad_pokoi = new QFormLayout(grupa_pokoi);
     pole_nazwy_pokoju_ = new QLineEdit(grupa_pokoi);
     pole_hasla_pokoju_ = new QLineEdit(grupa_pokoi);
     pole_hasla_pokoju_->setEchoMode(QLineEdit::Password);
-    auto* przycisk_utworz = new QPushButton(QStringLiteral("Create"), grupa_pokoi);
-    auto* przycisk_dolacz = new QPushButton(QStringLiteral("Join"), grupa_pokoi);
+    auto* przycisk_utworz = new QPushButton(QStringLiteral("Utwórz"), grupa_pokoi);
+    auto* przycisk_dolacz = new QPushButton(QStringLiteral("Dołącz"), grupa_pokoi);
 
-    uklad_pokoi->addRow(QStringLiteral("Room"), pole_nazwy_pokoju_);
-    uklad_pokoi->addRow(QStringLiteral("Password"), pole_hasla_pokoju_);
+    uklad_pokoi->addRow(QStringLiteral("Pokój"), pole_nazwy_pokoju_);
+    uklad_pokoi->addRow(QStringLiteral("Hasło"), pole_hasla_pokoju_);
     uklad_pokoi->addRow(QString(), przycisk_utworz);
     uklad_pokoi->addRow(QString(), przycisk_dolacz);
 
     connect(przycisk_utworz, &QPushButton::clicked, this, &OknoCzatu::utworzPokoj);
     connect(przycisk_dolacz, &QPushButton::clicked, this, &OknoCzatu::dolaczDoWybranegoPokoju);
 
-    auto* grupa_powiadomien = new QGroupBox(QStringLiteral("Notifications"), panel);
+    auto* grupa_powiadomien = new QGroupBox(QStringLiteral("Powiadomienia"), panel);
     auto* uklad_powiadomien = new QVBoxLayout(grupa_powiadomien);
     lista_powiadomien_ = new QListWidget(grupa_powiadomien);
     uklad_powiadomien->addWidget(lista_powiadomien_);
@@ -159,7 +159,7 @@ class OknoCzatu : public QMainWindow {
     connect(lista_powiadomien_, &QListWidget::itemDoubleClicked, this,
             &OknoCzatu::otworzPowiadomienieCzat);
 
-    auto* grupa_testowa = new QGroupBox(QStringLiteral("Test room"), panel);
+    auto* grupa_testowa = new QGroupBox(QStringLiteral("Pokój testowy"), panel);
     auto* uklad_testowy = new QFormLayout(grupa_testowa);
     pole_pokoju_testowego_ = new QLineEdit(grupa_testowa);
     pole_pokoju_testowego_->setPlaceholderText(QStringLiteral("test-room"));
@@ -182,10 +182,10 @@ class OknoCzatu : public QMainWindow {
     przyciski_testu->addWidget(przycisk_start_testu_);
     przyciski_testu->addWidget(przycisk_stop_testu_);
 
-    uklad_testowy->addRow(QStringLiteral("Room"), pole_pokoju_testowego_);
-    uklad_testowy->addRow(QStringLiteral("Bots"), pole_liczby_botow_);
-    uklad_testowy->addRow(QStringLiteral("Bot delay min"), pole_opoznienia_min_);
-    uklad_testowy->addRow(QStringLiteral("Bot delay max"), pole_opoznienia_max_);
+    uklad_testowy->addRow(QStringLiteral("Pokój"), pole_pokoju_testowego_);
+    uklad_testowy->addRow(QStringLiteral("Boty"), pole_liczby_botow_);
+    uklad_testowy->addRow(QStringLiteral("Opóźnienie bota min"), pole_opoznienia_min_);
+    uklad_testowy->addRow(QStringLiteral("Opóźnienie bota max"), pole_opoznienia_max_);
     uklad_testowy->addRow(przyciski_testu);
 
     connect(przycisk_start_testu_, &QPushButton::clicked, this, &OknoCzatu::uruchomPokojTestowy);
@@ -203,7 +203,7 @@ class OknoCzatu : public QMainWindow {
     auto* panel = new QWidget(this);
     auto* uklad = new QVBoxLayout(panel);
 
-    auto* etykieta = new QLabel(QStringLiteral("Rooms (center list)"), panel);
+    auto* etykieta = new QLabel(QStringLiteral("Pokoje (lista w środku)"), panel);
     etykieta->setAlignment(Qt::AlignCenter);
 
     lista_pokoi_ = new QListWidget(panel);
@@ -221,13 +221,13 @@ class OknoCzatu : public QMainWindow {
     auto* panel = new QWidget(this);
     auto* uklad = new QVBoxLayout(panel);
 
-    etykieta_aktualnego_pokoju_ = new QLabel(QStringLiteral("Current room: Lobby"), panel);
+    etykieta_aktualnego_pokoju_ = new QLabel(QStringLiteral("Aktualny pokój: Lobby"), panel);
     widok_czatu_pokoju_ = new QTextEdit(panel);
     widok_czatu_pokoju_->setReadOnly(true);
 
     auto* uklad_wejscia = new QHBoxLayout();
     pole_wiadomosci_ = new QLineEdit(panel);
-    przycisk_wyslij_ = new QPushButton(QStringLiteral("Send"), panel);
+    przycisk_wyslij_ = new QPushButton(QStringLiteral("Wyślij"), panel);
 
     uklad_wejscia->addWidget(pole_wiadomosci_, 1);
     uklad_wejscia->addWidget(przycisk_wyslij_);
@@ -244,8 +244,8 @@ class OknoCzatu : public QMainWindow {
   }
 
   void zbudujMenu() {
-    auto* menu_prywatne = menuBar()->addMenu(QStringLiteral("Private chats"));
-    auto* akcja_otworz = new QAction(QStringLiteral("Open chat..."), this);
+    auto* menu_prywatne = menuBar()->addMenu(QStringLiteral("Prywatne czaty"));
+    auto* akcja_otworz = new QAction(QStringLiteral("Otwórz czat..."), this);
     menu_prywatne->addAction(akcja_otworz);
     connect(akcja_otworz, &QAction::triggered, this, &OknoCzatu::zapytajPrywatnyCzat);
   }
@@ -323,8 +323,8 @@ class OknoCzatu : public QMainWindow {
 
   void wyslijLinie(const QString& linia) {
     if (gniazdo_->state() != QAbstractSocket::ConnectedState) {
-      QMessageBox::warning(this, QStringLiteral("Connection"),
-                           QStringLiteral("Not connected to server."));
+      QMessageBox::warning(this, QStringLiteral("Połączenie"),
+                           QStringLiteral("Brak połączenia z serwerem."));
       return;
     }
     const QByteArray dane = (linia + "\n").toUtf8();
@@ -334,12 +334,12 @@ class OknoCzatu : public QMainWindow {
  private slots:
   void poPolaczeniu() {
     dodajLiniePokoju(
-        QStringLiteral("Connected to %1:%2.").arg(adres_hosta_).arg(port_));
+        QStringLiteral("Połączono z %1:%2.").arg(adres_hosta_).arg(port_));
     wyslijLinie(QStringLiteral("/rooms"));
   }
 
   void poRozlaczeniu() {
-    dodajLiniePokoju(QStringLiteral("Disconnected from server."));
+    dodajLiniePokoju(QStringLiteral("Rozłączono z serwerem."));
     zatrzymajPokojTestowy();
   }
 
@@ -362,7 +362,7 @@ class OknoCzatu : public QMainWindow {
       }
       if (linia.startsWith(QStringLiteral("ROOM|"))) {
         const QString pokoj = linia.mid(5).trimmed();
-        etykieta_aktualnego_pokoju_->setText(QStringLiteral("Current room: %1").arg(pokoj));
+        etykieta_aktualnego_pokoju_->setText(QStringLiteral("Aktualny pokój: %1").arg(pokoj));
         continue;
       }
       if (linia.startsWith(QStringLiteral("[private]"))) {
@@ -394,8 +394,8 @@ class OknoCzatu : public QMainWindow {
     const QString nazwa = pole_nazwy_pokoju_->text().trimmed();
     const QString haslo = pole_hasla_pokoju_->text().trimmed();
     if (nazwa.isEmpty()) {
-      QMessageBox::information(this, QStringLiteral("Rooms"),
-                               QStringLiteral("Room name is required."));
+      QMessageBox::information(this, QStringLiteral("Pokoje"),
+                               QStringLiteral("Nazwa pokoju jest wymagana."));
       return;
     }
     QString komenda = QStringLiteral("/create %1").arg(nazwa);
@@ -408,8 +408,8 @@ class OknoCzatu : public QMainWindow {
   void dolaczDoWybranegoPokoju() {
     QListWidgetItem* element = lista_pokoi_->currentItem();
     if (!element) {
-      QMessageBox::information(this, QStringLiteral("Rooms"),
-                               QStringLiteral("Select a room from the list."));
+      QMessageBox::information(this, QStringLiteral("Pokoje"),
+                               QStringLiteral("Wybierz pokój z listy."));
       return;
     }
     dolaczDoPokojuZElementu(element);
@@ -421,8 +421,8 @@ class OknoCzatu : public QMainWindow {
     QString haslo = pole_hasla_pokoju_->text().trimmed();
     if (zablokowany && haslo.isEmpty()) {
       haslo = QInputDialog::getText(this,
-                                   QStringLiteral("Room password"),
-                                   QStringLiteral("Enter password for %1").arg(nazwa),
+                                   QStringLiteral("Hasło pokoju"),
+                                   QStringLiteral("Podaj hasło do %1").arg(nazwa),
                                    QLineEdit::Password);
     }
     QString komenda = QStringLiteral("/join %1").arg(nazwa);
@@ -444,8 +444,8 @@ class OknoCzatu : public QMainWindow {
   void zapytajPrywatnyCzat() {
     bool ok = false;
     const QString uzytkownik = QInputDialog::getText(
-        this, QStringLiteral("Private chat"), QStringLiteral("User name"), QLineEdit::Normal,
-        QString(), &ok);
+        this, QStringLiteral("Prywatny czat"), QStringLiteral("Nazwa użytkownika"),
+        QLineEdit::Normal, QString(), &ok);
     if (ok && !uzytkownik.trimmed().isEmpty()) {
       otworzPrywatnyCzat(uzytkownik.trimmed());
     }
@@ -457,8 +457,8 @@ class OknoCzatu : public QMainWindow {
 
   void uruchomPokojTestowy() {
     if (gniazdo_->state() != QAbstractSocket::ConnectedState) {
-      QMessageBox::warning(this, QStringLiteral("Connection"),
-                           QStringLiteral("Not connected to server."));
+      QMessageBox::warning(this, QStringLiteral("Połączenie"),
+                           QStringLiteral("Brak połączenia z serwerem."));
       return;
     }
     if (test_aktywny_) {
@@ -537,7 +537,7 @@ class OknoCzatu : public QMainWindow {
         const int nastepna_wiadomosc = ++liczniki_wiadomosci_botow_[bot];
         wyslijLinieBota(
             bot,
-            QStringLiteral("[%1] message %2").arg(nazwa_bota).arg(nastepna_wiadomosc));
+            QStringLiteral("[%1] wiadomość %2").arg(nazwa_bota).arg(nastepna_wiadomosc));
         if (opoznienie_min > 0 && opoznienie_max >= opoznienie_min) {
           const int opoznienie = QRandomGenerator::global()->bounded(opoznienie_min,
                                                                      opoznienie_max + 1);

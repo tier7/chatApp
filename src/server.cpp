@@ -271,7 +271,7 @@ void obsluz_prywatna_wiadomosc(UchwytGniazda nadawca,
   wiadomosc = przytnij(wiadomosc);
 
   if (nazwa_odbiorcy.empty() || wiadomosc.empty()) {
-    wyslij_system(nadawca, "Usage: /msg <user> <message>");
+    wyslij_system(nadawca, "Użycie: /msg <użytkownik> <wiadomość>");
     return;
   }
 
@@ -287,7 +287,7 @@ void obsluz_prywatna_wiadomosc(UchwytGniazda nadawca,
   }
 
   if (gniazdo_odbiorcy == kNieprawidloweGniazdo) {
-    wyslij_system(nadawca, "User not found: " + nazwa_odbiorcy);
+    wyslij_system(nadawca, "Nie znaleziono użytkownika: " + nazwa_odbiorcy);
     return;
   }
 
@@ -298,7 +298,7 @@ void obsluz_prywatna_wiadomosc(UchwytGniazda nadawca,
 }
 
 void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
-  std::string nazwa_klienta = "anon" + std::to_string(id_klienta);
+  std::string nazwa_klienta = "gość" + std::to_string(id_klienta);
   {
     std::lock_guard<std::mutex> blokada(mutex_klientow);
     klienci[gniazdo] = {gniazdo, nazwa_klienta, "Lobby"};
@@ -307,14 +307,14 @@ void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
   wyslij_przypisanie_pokoju(gniazdo, "Lobby");
   wyslij_liste_pokoi(gniazdo);
 
-  wyslij_system(gniazdo, "Welcome! Set your name with /name <nickname>.");
-  wyslij_system(gniazdo, "Use /msg <user> <message> for private chats.");
+  wyslij_system(gniazdo, "Witaj! Ustaw nazwę poleceniem /name <nick>.");
+  wyslij_system(gniazdo, "Użyj /msg <użytkownik> <wiadomość> do prywatnych czatów.");
   wyslij_system(gniazdo,
-                "Rooms: /create <room> [password], /join <room> [password], /leave, /delete <room>.");
+                "Pokoje: /create <pokój> [hasło], /join <pokój> [hasło], /leave, /delete <pokój>.");
 
   rozglos_liste_pokoi();
 
-  zapisz_log(nazwa_klienta + " joined the room Lobby.");
+  zapisz_log(nazwa_klienta + " dołączył do pokoju Lobby.");
 
   std::string przychodzace;
   char bufor[1024];
@@ -337,14 +337,14 @@ void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
       if (linia.rfind("/name ", 0) == 0) {
         std::string nowa_nazwa = przytnij(linia.substr(6));
         if (nowa_nazwa.empty()) {
-          wyslij_system(gniazdo, "Name cannot be empty.");
+          wyslij_system(gniazdo, "Nazwa nie może być pusta.");
           continue;
         }
         {
           std::lock_guard<std::mutex> blokada(mutex_klientow);
           for (const auto& [gniazdo_klienta, klient] : klienci) {
             if (klient.nazwa == nowa_nazwa) {
-              wyslij_system(gniazdo, "Name already in use.");
+              wyslij_system(gniazdo, "Nazwa jest już zajęta.");
               nowa_nazwa.clear();
               break;
             }
@@ -356,9 +356,9 @@ void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
         if (!nowa_nazwa.empty()) {
           if (!czy_nazwa_bota(nowa_nazwa)) {
             rozglos_wiadomosc(
-                "[system] " + nazwa_klienta + " is now known as " + nowa_nazwa + ".\n");
+                "[system] " + nazwa_klienta + " ma teraz nazwę " + nowa_nazwa + ".\n");
           }
-          zapisz_log(nazwa_klienta + " renamed to " + nowa_nazwa);
+          zapisz_log(nazwa_klienta + " zmienił nazwę na " + nowa_nazwa);
           nazwa_klienta = nowa_nazwa;
         }
         continue;
@@ -381,11 +381,11 @@ void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
         strumien >> nazwa_pokoju;
         strumien >> haslo;
         if (nazwa_pokoju.empty()) {
-          wyslij_system(gniazdo, "Usage: /create <room> [password]");
+          wyslij_system(gniazdo, "Użycie: /create <pokój> [hasło]");
           continue;
         }
         if (!utworz_pokoj(nazwa_pokoju, haslo, gniazdo)) {
-          wyslij_system(gniazdo, "Room already exists.");
+          wyslij_system(gniazdo, "Pokój już istnieje.");
           continue;
         }
         rozglos_liste_pokoi();
@@ -395,14 +395,14 @@ void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
           obecny_pokoj = klienci[gniazdo].pokoj;
         }
         if (!dolacz_do_pokoju(gniazdo, nazwa_pokoju, haslo)) {
-          wyslij_system(gniazdo, "Room created, but unable to join.");
+          wyslij_system(gniazdo, "Pokój utworzony, ale nie udało się dołączyć.");
           continue;
         }
         if (!obecny_pokoj.empty() && obecny_pokoj != nazwa_pokoju) {
           opusc_pokoj(gniazdo, obecny_pokoj);
           if (!czy_nazwa_bota(nazwa_klienta)) {
             rozglos_wiadomosc_pokoju(
-                obecny_pokoj, "[system] " + nazwa_klienta + " left the room.\n", gniazdo);
+                obecny_pokoj, "[system] " + nazwa_klienta + " opuścił pokój.\n", gniazdo);
           }
         }
         {
@@ -412,10 +412,10 @@ void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
         wyslij_przypisanie_pokoju(gniazdo, nazwa_pokoju);
         if (!czy_nazwa_bota(nazwa_klienta)) {
           rozglos_wiadomosc_pokoju(
-              nazwa_pokoju, "[system] " + nazwa_klienta + " joined the room.\n", gniazdo);
+              nazwa_pokoju, "[system] " + nazwa_klienta + " dołączył do pokoju.\n", gniazdo);
         }
-        zapisz_log(nazwa_klienta + " joined room " + nazwa_pokoju);
-        wyslij_system(gniazdo, "Room created and joined: " + nazwa_pokoju);
+        zapisz_log(nazwa_klienta + " dołączył do pokoju " + nazwa_pokoju);
+        wyslij_system(gniazdo, "Pokój utworzony i dołączono: " + nazwa_pokoju);
         continue;
       }
 
@@ -426,7 +426,7 @@ void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
         strumien >> nazwa_pokoju;
         strumien >> haslo;
         if (nazwa_pokoju.empty()) {
-          wyslij_system(gniazdo, "Usage: /join <room> [password]");
+          wyslij_system(gniazdo, "Użycie: /join <pokój> [hasło]");
           continue;
         }
         std::string obecny_pokoj;
@@ -435,14 +435,14 @@ void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
           obecny_pokoj = klienci[gniazdo].pokoj;
         }
         if (!dolacz_do_pokoju(gniazdo, nazwa_pokoju, haslo)) {
-          wyslij_system(gniazdo, "Unable to join room. Check name or password.");
+          wyslij_system(gniazdo, "Nie można dołączyć do pokoju. Sprawdź nazwę lub hasło.");
           continue;
         }
         if (!obecny_pokoj.empty() && obecny_pokoj != nazwa_pokoju) {
           opusc_pokoj(gniazdo, obecny_pokoj);
           if (!czy_nazwa_bota(nazwa_klienta)) {
             rozglos_wiadomosc_pokoju(
-                obecny_pokoj, "[system] " + nazwa_klienta + " left the room.\n", gniazdo);
+                obecny_pokoj, "[system] " + nazwa_klienta + " opuścił pokój.\n", gniazdo);
           }
         }
         {
@@ -452,9 +452,9 @@ void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
         wyslij_przypisanie_pokoju(gniazdo, nazwa_pokoju);
         if (!czy_nazwa_bota(nazwa_klienta)) {
           rozglos_wiadomosc_pokoju(
-              nazwa_pokoju, "[system] " + nazwa_klienta + " joined the room.\n", gniazdo);
+              nazwa_pokoju, "[system] " + nazwa_klienta + " dołączył do pokoju.\n", gniazdo);
         }
-        zapisz_log(nazwa_klienta + " joined room " + nazwa_pokoju);
+        zapisz_log(nazwa_klienta + " dołączył do pokoju " + nazwa_pokoju);
         continue;
       }
 
@@ -463,21 +463,21 @@ void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
         std::string nazwa_pokoju;
         strumien >> nazwa_pokoju;
         if (nazwa_pokoju.empty()) {
-          wyslij_system(gniazdo, "Usage: /delete <room>");
+          wyslij_system(gniazdo, "Użycie: /delete <pokój>");
           continue;
         }
         std::vector<UchwytGniazda> czlonkowie;
         WynikUsunieciaPokoju wynik = usun_pokoj(nazwa_pokoju, gniazdo, &czlonkowie);
         if (wynik == WynikUsunieciaPokoju::NieZnaleziono) {
-          wyslij_system(gniazdo, "Room not found.");
+          wyslij_system(gniazdo, "Nie znaleziono pokoju.");
           continue;
         }
         if (wynik == WynikUsunieciaPokoju::Lobby) {
-          wyslij_system(gniazdo, "The Lobby cannot be deleted.");
+          wyslij_system(gniazdo, "Lobby nie może zostać usunięte.");
           continue;
         }
         if (wynik == WynikUsunieciaPokoju::NieWlasciciel) {
-          wyslij_system(gniazdo, "Only the room owner can delete it.");
+          wyslij_system(gniazdo, "Tylko właściciel pokoju może go usunąć.");
           continue;
         }
         for (UchwytGniazda gniazdo_czlonka : czlonkowie) {
@@ -490,10 +490,10 @@ void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
           }
           dolacz_do_pokoju(gniazdo_czlonka, "Lobby", "");
           wyslij_przypisanie_pokoju(gniazdo_czlonka, "Lobby");
-          wyslij_system(gniazdo_czlonka, "Room deleted. You have been moved to Lobby.");
+          wyslij_system(gniazdo_czlonka, "Pokój usunięty. Przeniesiono Cię do Lobby.");
         }
         rozglos_liste_pokoi();
-        zapisz_log(nazwa_klienta + " deleted room " + nazwa_pokoju);
+        zapisz_log(nazwa_klienta + " usunął pokój " + nazwa_pokoju);
         continue;
       }
 
@@ -504,19 +504,19 @@ void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
           obecny_pokoj = klienci[gniazdo].pokoj;
         }
         if (obecny_pokoj.empty() || obecny_pokoj == "Lobby") {
-          wyslij_system(gniazdo, "You are already in the Lobby.");
+          wyslij_system(gniazdo, "Już jesteś w Lobby.");
           continue;
         }
         opusc_pokoj(gniazdo, obecny_pokoj);
         rozglos_wiadomosc_pokoju(
-            obecny_pokoj, "[system] " + nazwa_klienta + " left the room.\n", gniazdo);
+            obecny_pokoj, "[system] " + nazwa_klienta + " opuścił pokój.\n", gniazdo);
         dolacz_do_pokoju(gniazdo, "Lobby", "");
         {
           std::lock_guard<std::mutex> blokada(mutex_klientow);
           klienci[gniazdo].pokoj = "Lobby";
         }
         wyslij_przypisanie_pokoju(gniazdo, "Lobby");
-        wyslij_system(gniazdo, "Moved to Lobby.");
+        wyslij_system(gniazdo, "Przeniesiono do Lobby.");
         continue;
       }
 
@@ -527,7 +527,7 @@ void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
       }
 
       if (obecny_pokoj.empty()) {
-        wyslij_system(gniazdo, "Join a room before chatting.");
+        wyslij_system(gniazdo, "Dołącz do pokoju zanim zaczniesz pisać.");
         continue;
       }
 
@@ -547,11 +547,11 @@ void obsluz_klienta(UchwytGniazda gniazdo, int id_klienta) {
   if (!obecny_pokoj.empty()) {
     opusc_pokoj(gniazdo, obecny_pokoj);
     rozglos_wiadomosc_pokoju(
-        obecny_pokoj, "[system] " + nazwa_klienta + " left the room.\n", gniazdo);
+        obecny_pokoj, "[system] " + nazwa_klienta + " opuścił pokój.\n", gniazdo);
   }
   zamknij_gniazdo(gniazdo);
-  rozglos_wiadomosc("[system] " + nazwa_klienta + " left the chat.\n");
-  zapisz_log(nazwa_klienta + " left the chat.");
+  rozglos_wiadomosc("[system] " + nazwa_klienta + " opuścił czat.\n");
+  zapisz_log(nazwa_klienta + " opuścił czat.");
 }
 
 void obsluz_sygnal(int) {
@@ -571,7 +571,7 @@ int main(int liczba_argumentow, char* argumenty[]) {
 
   plik_logu.open(sciezka_logu, std::ios::app);
   if (!plik_logu) {
-    std::cerr << "Unable to open log file: " << sciezka_logu << "\n";
+    std::cerr << "Nie można otworzyć pliku logu: " << sciezka_logu << "\n";
     return 1;
   }
 
@@ -592,7 +592,7 @@ int main(int liczba_argumentow, char* argumenty[]) {
 
   UchwytGniazda gniazdo_serwera = socket(AF_INET, SOCK_STREAM, 0);
   if (gniazdo_serwera == kNieprawidloweGniazdo) {
-    std::cerr << "Socket error: " << tekst_bledu_gniazda() << "\n";
+    std::cerr << "Błąd gniazda: " << tekst_bledu_gniazda() << "\n";
 #ifdef _WIN32
     WSACleanup();
 #endif
@@ -616,7 +616,7 @@ int main(int liczba_argumentow, char* argumenty[]) {
   adres.sin_port = htons(static_cast<uint16_t>(port));
 
   if (bind(gniazdo_serwera, reinterpret_cast<sockaddr*>(&adres), sizeof(adres)) < 0) {
-    std::cerr << "Bind error: " << tekst_bledu_gniazda() << "\n";
+    std::cerr << "Błąd bind: " << tekst_bledu_gniazda() << "\n";
     zamknij_gniazdo(gniazdo_serwera);
 #ifdef _WIN32
     WSACleanup();
@@ -625,7 +625,7 @@ int main(int liczba_argumentow, char* argumenty[]) {
   }
 
   if (listen(gniazdo_serwera, 10) < 0) {
-    std::cerr << "Listen error: " << tekst_bledu_gniazda() << "\n";
+    std::cerr << "Błąd listen: " << tekst_bledu_gniazda() << "\n";
     zamknij_gniazdo(gniazdo_serwera);
 #ifdef _WIN32
     WSACleanup();
@@ -633,8 +633,8 @@ int main(int liczba_argumentow, char* argumenty[]) {
     return 1;
   }
 
-  std::cout << "Chat server started on port " << port
-            << ". Log file: " << sciezka_logu << "\n";
+  std::cout << "Serwer czatu uruchomiony na porcie " << port
+            << ". Plik logu: " << sciezka_logu << "\n";
 
   int id_klienta = 1;
   while (uruchomione.load()) {
@@ -653,7 +653,7 @@ int main(int liczba_argumentow, char* argumenty[]) {
         continue;
       }
 #endif
-      std::cerr << "Accept error: " << tekst_bledu_gniazda() << "\n";
+      std::cerr << "Błąd accept: " << tekst_bledu_gniazda() << "\n";
       break;
     }
 
@@ -661,7 +661,7 @@ int main(int liczba_argumentow, char* argumenty[]) {
   }
 
   zamknij_gniazdo(gniazdo_serwera);
-  zapisz_log("Server shutting down.");
+  zapisz_log("Zamykanie serwera.");
 #ifdef _WIN32
   WSACleanup();
 #endif
